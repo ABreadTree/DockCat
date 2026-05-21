@@ -83,6 +83,20 @@ We recommend the following for the best experience:
 - Do not include floors, shadows, scenery, UI, text, or unrelated props unless a pose specifically needs them.
 - Use one visual style across the full pack: same line weight, color palette, lighting, and canvas position.
 
+## Walking Animation Tips
+
+Walking frames need stricter consistency than static poses because DockCat plays them in a loop while moving the cat horizontally.
+
+For best results:
+
+- Create one side-view cat image first and reuse it as the identity reference for every walk-frame generation.
+- Generate the walk as one planned 4-frame cycle when possible, preferably as a single horizontal strip with four equal cells.
+- Keep one walking direction only. DockCat mirrors the same frames automatically for the opposite direction.
+- Name frames in playback order, such as `walk_01.png`, `walk_02.png`, `walk_03.png`, and `walk_04.png`.
+- Preview the frames as a loop before loading the pack. Regenerate frames that cause body-size popping, baseline jumps, changed markings, cropped paws or tail, visible guide marks, shadows, floors, or speed-line effects.
+
+See `ImageGenerationPrompts.md` for the recommended walk-strip prompt and QA checklist.
+
 ## Manifest
 
 `manifest.json` lives at the root of the pack.

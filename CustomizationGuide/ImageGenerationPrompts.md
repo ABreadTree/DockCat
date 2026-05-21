@@ -82,6 +82,26 @@ Example output file: `poses/transition/stretch.png`
 
 ### Animation Frame Prompts
 
+#### Walking Animation Tips
+
+Walking frames are usually harder to make consistent than static poses. If your AI image generation tool cannot generate multiple frames in one request, try generating the walk frames one at a time. You can also try the staged workflow below instead of asking for unrelated single frames:
+
+1. Generate one canonical static side-view image of the cat first. This image is the identity reference for the walk cycle.
+2. Generate the walk cycle as one strip or one planned set, using the canonical side-view image and the original cat references in the same request.
+3. Keep only one walking direction. DockCat mirrors the frames in the app for the opposite direction.
+4. Review the frames as an animation before adding them to the pack. Reject frames with size popping, baseline jumps, identity drift, copied guide marks, cropped paws/tail, shadows, speed lines, dust, floor patches, or inconsistent padding.
+5. If only one or two frames are wrong, regenerate those frames with the canonical side-view image plus the neighboring correct frames. Do not restart the whole pack unless the cat identity changed across the full cycle.
+
+When your image tool can generate a single contact strip, prefer this layout because it gives the model one shared scale and baseline:
+
+- 4 equal square cells in one horizontal row.
+- Same transparent or plain removable background in every cell.
+- The cat centered in each cell with the same visual size.
+- Paw-bottom baseline aligned across all cells.
+- No visible borders, labels, frame numbers, arrows, guide marks, floor, shadow, or scenery in the final image.
+
+After generating a strip, crop or export each cell to separate PNG files named `walk_01.png`, `walk_02.png`, `walk_03.png`, and `walk_04.png`. Every exported frame should keep the same canvas size.
+
 #### Prompt Template
 
 Create a transparent-background PNG animation cycle of the referenced cat performing this motion: `[Describe the animation action, movement direction, mood, body mechanics, and intended app use case here.]`
@@ -108,20 +128,56 @@ File requirements:
 
 If generating frames one at a time, always reference the planned full-frame cycle and the previously generated frames. Keep canvas size, scale, anchor position, line weight, color palette, and visual style identical across all frames.
 
-#### Single-Sided Walk
+#### Walk Frames Prompt
 
 Create a looping walk cycle of the referenced cat walking to one side. Before generating images, plan the motion for every frame so the cycle connects smoothly:
 
-- `walk_01.png`: contact pose, front paw on the walking side reaching forward, opposite rear paw pushing back.
-- `walk_02.png`: passing pose, body slightly centered, paws moving under the body.
-- `walk_03.png`: opposite contact pose, the other front and rear paws taking weight.
-- `walk_04.png`: return/passing pose that leads cleanly back into `walk_01.png`.
+- `walk_01.png`: first contact pose in a natural four-legged walk, with one front paw reaching forward and the opposite rear paw pushing back.
+- `walk_02.png`: passing pose that continues from Frame 1, with the body moving forward over the planted paws and the lifted paws swinging through.
+- `walk_03.png`: opposite contact pose, using the other diagonal pair from Frame 1.
+- `walk_04.png`: second passing pose that continues from Frame 3 and leads naturally back into Frame 1.
 
-The walk should be slow, relaxed, and cute, suitable for a desktop pet strolling along the macOS Dock. Keep paw motion clear and readable, with a stable body anchor so the app can move the character horizontally.
-
-If your AI image generation tool cannot generate multiple frames in one request, try generating the walk frames one at a time.
+The walk should be slow, relaxed, and cute, suitable for a desktop pet strolling along the macOS Dock. Let the model solve the exact paw placement as a natural cat walk, but make sure the front legs and rear legs both alternate across the loop. Keep the body anchor stable so the app can move the character horizontally.
 
 Example output folder: `animations/walk/`
+
+#### Walk Strip Prompt
+
+Use this when your image generation tool can produce one image containing all walk frames:
+
+Create one horizontal 4-frame walk-cycle strip of the referenced cat walking to the right, suitable for DockCat's `animations/walk/` frames.
+
+Use the uploaded canonical side-view cat image as the primary identity reference, and also use the original cat photos as supporting references. Preserve the cat's exact coat markings, fur length, colors, face shape, body proportions, line weight, palette, and cute retro web-game style across all 4 frames.
+
+Layout:
+
+- One image containing 4 equal square cells in a single horizontal row.
+- Each cell represents one frame of the same looping walk cycle.
+- The cells must share the same cat scale, same paw-bottom baseline, same canvas padding, same lighting, and same transparent or plain removable background.
+- Do not include visible cell borders, frame numbers, labels, arrows, guides, floor, shadow, scenery, UI, or text.
+
+Motion plan:
+
+- Frame 1: first contact pose in a natural four-legged walk, with one front paw reaching forward and the opposite rear paw pushing back.
+- Frame 2: passing pose that continues from Frame 1, with the body moving forward over the planted paws and the lifted paws swinging through.
+- Frame 3: opposite contact pose, using the other diagonal pair from Frame 1.
+- Frame 4: second passing pose that continues from Frame 3 and leads naturally back into Frame 1.
+
+The walk should be slow, relaxed, and cute, suitable for a desktop pet strolling along the macOS Dock. Show motion through paws, legs, a tiny body bob, and subtle tail position changes only. Let the image model choose natural paw placement, but check that both the front legs and rear legs alternate visibly, Frame 2 follows from Frame 1, Frame 4 follows from Frame 3, and Frame 4 loops cleanly into Frame 1. Do not draw speed lines, dust clouds, motion trails, ground shadows, floor patches, detached effects, or extra props.
+
+After generation, export the 4 cells as separate PNG files named `walk_01.png` through `walk_04.png`, keeping identical canvas size and alpha transparency for every frame.
+
+#### Walk QA Checklist
+
+Before using generated walk frames in DockCat, check:
+
+- All frames have the same pixel dimensions.
+- The cat's visible size is consistent across frames.
+- Paw-bottom or body-bottom baseline stays aligned.
+- Coat markings, face, tail, and body proportions do not drift.
+- No frame contains floor, shadow, scenery, text, guide marks, or detached effects.
+- The cycle reads correctly in filename order and loops cleanly from the last frame back to the first.
+- The app only needs one walking direction; do not add separate left and right folders.
 
 ## App Icon
 
