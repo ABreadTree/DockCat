@@ -19,7 +19,7 @@ It rests, stretches, and wanders along the Dock, and can gently remind you to dr
   </tr>
 </table>
 
-The current version (v0.6.2) supports macOS 12 and later, on both Intel Macs and Apple Silicon Macs.
+The current version (v0.7.0) supports macOS 12 and later, on both Intel Macs and Apple Silicon Macs.
 
 Windows users can check out the [community ported version](https://github.com/yitian-ma/DockCatWin).
 

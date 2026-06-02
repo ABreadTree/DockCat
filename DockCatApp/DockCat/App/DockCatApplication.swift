@@ -8,6 +8,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private let collectableInventoryStore = CollectableInventoryStore()
     private let userDataBackupStore = UserDataBackupStore()
     private let outingCatalogLoader = OutingCatalogLoader()
+    private let giftCodeRedeemer = GiftCodeRedeemer()
     private let outingWakeResolver = OutingWakeResolver()
     private let assetLoader = AssetPackLoader()
     private let stateScheduler = StateScheduler()
@@ -43,6 +44,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private var pendingOutingDuration: TimeInterval?
     private var pendingOutingReturnReward: OutingReward?
     private var shouldUseStartPositionForNextTransition = false
+    private var giftCodeInputWindow: NSWindow?
+    private var giftCodeSuccessWindow: NSWindow?
+    private var giftCodeCallbackTargets: [CallbackTarget] = []
 
     private var strings: AppStrings {
         AppStrings(language: settings.language)
@@ -91,7 +95,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         if !restoreActiveOutingIfNeeded() {
             scheduleStartupStretch()
         }
-        startReminderPolling()
+        if !stateMachine.state.isOuting {
+            startReminderPolling()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -102,7 +108,6 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         outingTimer?.invalidate()
         stopWalk()
         usageSessionTracker.stop()
-        saveUserDataBackup()
         removeUsageSessionObservers()
     }
 
@@ -287,8 +292,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         userDataBackupStore.save(
             settings: settings,
             usageStatistics: usageSessionTracker.snapshot,
-            collectableInventory: collectableInventory,
-            outingCatalog: outingCatalog
+            collectableInventory: collectableInventory
         )
     }
 
@@ -304,6 +308,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         }
         settingsWindowController.onRestoreData = { [weak self] in
             self?.beginUserDataRestore()
+        }
+        settingsWindowController.onRedeemGiftCode = { [weak self] language in
+            self?.beginGiftCodeRedemption(language: language)
         }
         settingsWindowController.onLoadAssetPack = { [weak self] selectedID in
             guard let self else {
@@ -381,12 +388,201 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         showAlert(title: strings.restoreDataSuccessTitle, message: message)
     }
 
-    private func showAlert(title: String, message: String) {
+    private func beginGiftCodeRedemption(language: AppLanguage) {
+        showGiftCodeInputWindow(language: language)
+    }
+
+    private func redeemGiftCode(_ code: String, language: AppLanguage) {
+        let codeStrings = AppStrings(language: language)
+        guard let collectableID = giftCodeRedeemer.collectableID(for: code, in: outingCatalog),
+              let collectable = outingCatalog.collectables.first(where: { $0.id == collectableID })
+        else {
+            showAlert(title: codeStrings.giftCodeInvalidTitle, message: "", okTitle: codeStrings.assetPackAlertOK)
+            return
+        }
+
+        _ = collectableInventory.recordCollectable(collectable.id)
+        collectableInventoryStore.save(collectableInventory)
+        settingsWindowController.update(collectableInventory: collectableInventory)
+        saveUserDataBackup()
+        showGiftCodeSuccess(collectable, language: language)
+    }
+
+    private func showGiftCodeInputWindow(language: AppLanguage) {
+        giftCodeInputWindow?.close()
+        giftCodeInputWindow = nil
+        giftCodeCallbackTargets.removeAll()
+        let codeStrings = AppStrings(language: language)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 292, height: 150),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = codeStrings.settingsRedeemGiftCode
+        window.isReleasedWhenClosed = false
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 2)
+        window.collectionBehavior = [.canJoinAllSpaces]
+        window.center()
+
+        let contentView = NSView()
+        window.contentView = contentView
+
+        let titleLabel = NSTextField(labelWithString: codeStrings.giftCodeInputTitle)
+        titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        titleLabel.alignment = .center
+
+        let subtitleLabel = NSTextField(labelWithString: codeStrings.giftCodeInputSubtitle)
+        subtitleLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
+        subtitleLabel.textColor = .secondaryLabelColor
+        subtitleLabel.alignment = .center
+
+        let codeField = NSTextField(string: "")
+        codeField.isEditable = true
+        codeField.isSelectable = true
+        codeField.usesSingleLineMode = true
+
+        let cancelButton = NSButton(title: codeStrings.alertCancel, target: nil, action: nil)
+        cancelButton.bezelStyle = .rounded
+        cancelButton.keyEquivalent = "\u{1b}"
+
+        let submitButton = NSButton(title: codeStrings.giftCodeSubmit, target: nil, action: nil)
+        submitButton.bezelStyle = .rounded
+        submitButton.keyEquivalent = "\r"
+
+        let buttonRow = NSStackView(views: [cancelButton, submitButton])
+        buttonRow.orientation = .horizontal
+        buttonRow.alignment = .centerY
+        buttonRow.distribution = .fillEqually
+        buttonRow.spacing = 10
+
+        for view in [titleLabel, subtitleLabel, codeField, buttonRow] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(view)
+        }
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 14),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            subtitleLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            subtitleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 20),
+            subtitleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -20),
+            codeField.topAnchor.constraint(equalTo: subtitleLabel.bottomAnchor, constant: 10),
+            codeField.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            codeField.widthAnchor.constraint(equalToConstant: 176),
+            buttonRow.topAnchor.constraint(equalTo: codeField.bottomAnchor, constant: 14),
+            buttonRow.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            buttonRow.widthAnchor.constraint(equalToConstant: 184),
+            buttonRow.heightAnchor.constraint(equalToConstant: 28)
+        ])
+
+        let cancelTarget = CallbackTarget {
+            window.close()
+            self.giftCodeInputWindow = nil
+            self.giftCodeCallbackTargets.removeAll()
+        }
+        let submitTarget = CallbackTarget {
+            let code = codeField.stringValue
+            window.close()
+            self.giftCodeInputWindow = nil
+            self.giftCodeCallbackTargets.removeAll()
+            self.redeemGiftCode(code, language: language)
+        }
+        giftCodeCallbackTargets = [cancelTarget, submitTarget]
+        cancelButton.target = cancelTarget
+        cancelButton.action = #selector(CallbackTarget.invoke)
+        submitButton.target = submitTarget
+        submitButton.action = #selector(CallbackTarget.invoke)
+
+        giftCodeInputWindow = window
+        window.makeKeyAndOrderFront(nil)
+        window.makeFirstResponder(codeField)
+        NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
+    }
+
+    private func showGiftCodeSuccess(_ collectable: OutingCollectable, language: AppLanguage) {
+        giftCodeSuccessWindow?.close()
+        let codeStrings = AppStrings(language: language)
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 240, height: 204),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = codeStrings.settingsRedeemGiftCode
+        window.isReleasedWhenClosed = false
+        window.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 2)
+        window.collectionBehavior = [.canJoinAllSpaces]
+        window.center()
+
+        let contentView = NSView()
+        window.contentView = contentView
+
+        let titleLabel = NSTextField(labelWithString: codeStrings.giftCodeSuccessTitle)
+        titleLabel.font = .systemFont(ofSize: NSFont.systemFontSize, weight: .semibold)
+        titleLabel.alignment = .center
+
+        let imageView = NSImageView()
+        imageView.image = collectableImage(collectable)
+        imageView.imageScaling = .scaleProportionallyUpOrDown
+
+        let nameLabel = NSTextField(labelWithString: codeStrings.collectableName(collectable))
+        nameLabel.alignment = .center
+        nameLabel.font = .systemFont(ofSize: NSFont.systemFontSize)
+        nameLabel.lineBreakMode = .byTruncatingTail
+        nameLabel.maximumNumberOfLines = 1
+
+        let okButton = NSButton(title: codeStrings.giftCodeDone, target: nil, action: nil)
+        okButton.bezelStyle = .rounded
+        okButton.keyEquivalent = "\r"
+
+        for view in [titleLabel, imageView, nameLabel, okButton] {
+            view.translatesAutoresizingMaskIntoConstraints = false
+            contentView.addSubview(view)
+        }
+
+        NSLayoutConstraint.activate([
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 16),
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
+            imageView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 10),
+            imageView.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            imageView.widthAnchor.constraint(equalToConstant: 80),
+            imageView.heightAnchor.constraint(equalToConstant: 80),
+            nameLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 4),
+            nameLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 18),
+            nameLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -18),
+            okButton.topAnchor.constraint(equalTo: nameLabel.bottomAnchor, constant: 16),
+            okButton.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+            okButton.widthAnchor.constraint(equalToConstant: 96)
+        ])
+
+        let okTarget = CallbackTarget {
+            window.close()
+            self.giftCodeSuccessWindow = nil
+            self.giftCodeCallbackTargets.removeAll()
+        }
+        giftCodeCallbackTargets.append(okTarget)
+        okButton.target = okTarget
+        okButton.action = #selector(CallbackTarget.invoke)
+
+        giftCodeSuccessWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
+    }
+
+    private func showAlert(title: String, message: String, okTitle: String? = nil) {
         let alert = NSAlert()
         alert.alertStyle = .informational
         alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: strings.assetPackAlertOK)
+        if !message.isEmpty {
+            alert.informativeText = message
+        }
+        alert.addButton(withTitle: okTitle ?? strings.assetPackAlertOK)
         alert.runModal()
     }
 
@@ -401,6 +597,19 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         appMenu.addItem(menuItem(strings.menuSleep, #selector(quitFromMenu), keyEquivalent: "q"))
         appMenuItem.submenu = appMenu
         mainMenu.addItem(appMenuItem)
+
+        let editMenuItem = NSMenuItem()
+        let editMenu = NSMenu(title: "Edit")
+        editMenu.addItem(NSMenuItem(title: "Undo", action: #selector(UndoManager.undo), keyEquivalent: "z"))
+        editMenu.addItem(NSMenuItem(title: "Redo", action: #selector(UndoManager.redo), keyEquivalent: "Z"))
+        editMenu.addItem(NSMenuItem.separator())
+        editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
+        editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
+        editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
+        editMenuItem.submenu = editMenu
+        mainMenu.addItem(editMenuItem)
+
         NSApplication.shared.mainMenu = mainMenu
     }
 
@@ -552,6 +761,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.reminderScheduler.complete(type)
                 self.usageSessionTracker.recordCompletedReminder(type)
+                self.saveUserDataBackup()
                 self.catWindow.hideBubble()
                 self.stateMachine.finishReminder()
             },
@@ -627,7 +837,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         settings.activeOutingEndDate = Date().addingTimeInterval(duration)
         settings.activeOutingDuration = duration
         settingsStore.save(settings)
-        reminderScheduler.clear()
+        suspendRemindersForOuting()
         scheduleOutingReturn(after: duration, plannedDuration: duration)
         pendingOutingDuration = nil
         stateMachine.departOuting()
@@ -728,6 +938,8 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         pendingOutingReturnReward = nil
         catWindow.hideBubble()
         stateMachine.welcomeBack()
+        restartRemindersAfterOuting()
+        saveUserDataBackup()
     }
 
     private func collectableImage(_ collectable: OutingCollectable) -> NSImage? {
@@ -735,6 +947,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     }
 
     private func startReminderPolling() {
+        guard reminderTimer == nil else { return }
         reminderTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
@@ -742,6 +955,23 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
                     _ = self.stateMachine.requestReminder(reminder)
                 }
             }
+        }
+    }
+
+    private func stopReminderPolling() {
+        reminderTimer?.invalidate()
+        reminderTimer = nil
+    }
+
+    private func suspendRemindersForOuting() {
+        reminderScheduler.clear()
+        stopReminderPolling()
+    }
+
+    private func restartRemindersAfterOuting() {
+        reminderScheduler.restartTimersFromNow()
+        if reminderScheduler.settings.remindersEnabled {
+            startReminderPolling()
         }
     }
 
@@ -761,7 +991,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             return false
         }
 
-        reminderScheduler.clear()
+        suspendRemindersForOuting()
         stateMachine.restoreOutingAway()
 
         switch outingWakeResolver.resolution(
@@ -1081,5 +1311,17 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
 
     @objc private func quitFromMenu() {
         NSApplication.shared.terminate(nil)
+    }
+}
+
+private final class CallbackTarget: NSObject {
+    private let callback: () -> Void
+
+    init(_ callback: @escaping () -> Void) {
+        self.callback = callback
+    }
+
+    @objc func invoke() {
+        callback()
     }
 }

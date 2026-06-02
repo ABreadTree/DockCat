@@ -14,6 +14,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     var assetPackIDsProvider: () -> [String] = { [] }
     var onOpenAssetPacksFolder: () -> Void = {}
     var onRestoreData: (() -> Void)?
+    var onRedeemGiftCode: ((AppLanguage) -> Void)?
     var onLoadAssetPack: (String) -> AssetPackPreviewResult = { id in
         AssetPackPreviewResult(
             report: AssetPackValidationReport(
@@ -110,6 +111,9 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             onLoadAssetPack: onLoadAssetPack,
             onRestoreData: { [weak self] in
                 self?.onRestoreData?()
+            },
+            onRedeemGiftCode: { [weak self] language in
+                self?.onRedeemGiftCode?(language)
             }
         ) { [weak self] updated in
             guard let self else { return }

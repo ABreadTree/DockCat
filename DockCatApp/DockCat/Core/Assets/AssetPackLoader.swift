@@ -360,8 +360,10 @@ final class AssetPackLoader {
         manifest.id == "my-cat"
             && manifest.name == "My Cat"
             && manifest.author == "Your Name"
-            && manifest.canvasWidth == 512
-            && manifest.canvasHeight == 512
+            && (
+                (manifest.canvasWidth == 512 && manifest.canvasHeight == 512)
+                    || (manifest.canvasWidth == 1024 && manifest.canvasHeight == 1024)
+            )
             && manifest.defaultAnchor == .init(x: 0.5, y: 0.88)
             && manifest.poses == .init(
                 resting: "poses/resting",
@@ -444,8 +446,8 @@ final class AssetPackLoader {
           "id": "my-cat",
           "name": "My Cat",
           "author": "Your Name",
-          "canvas_width": 512,
-          "canvas_height": 512,
+          "canvas_width": 1024,
+          "canvas_height": 1024,
           "default_anchor": {
             "x": 0.5,
             "y": 0.88

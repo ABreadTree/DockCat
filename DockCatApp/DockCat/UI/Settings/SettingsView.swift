@@ -80,13 +80,33 @@ struct SettingsView: View {
     private let rowSpacing: CGFloat = 6
     private let panelWidth: CGFloat = 420
     private let statisticsContentWidth: CGFloat = 392
-    private let collectablesGridWidth: CGFloat = 404
+    private let collectablesGridWidth: CGFloat = 436
+    private let collectableCellWidth: CGFloat = 92
+    private let collectableCellHeight: CGFloat = 136
+    private let collectableImageBackgroundSize: CGFloat = 92
+    private let collectableImageSize: CGFloat = 80
+    private let collectableGridSpacing: CGFloat = 4
+    private let collectablesScrollbarGutter: CGFloat = 6
+    private var collectablesGridHeight: CGFloat {
+        collectableCellHeight * 2 + collectableGridSpacing
+    }
+    private var collectablesGridContentWidth: CGFloat {
+        collectableCellWidth * 4 + collectableGridSpacing * 3
+    }
+    private var collectablesScrollableContentWidth: CGFloat {
+        collectablesGridContentWidth + collectablesScrollbarGutter
+    }
+    private var collectablesGridLeadingInset: CGFloat {
+        (collectablesGridWidth - collectablesScrollableContentWidth) / 2
+    }
+    private let petTabVisualOffsetX: CGFloat = -10
     private var assetInputWidth: CGFloat { controlWidth }
     private var rowWidth: CGFloat { labelWidth + rowSpacing + controlWidth }
     private let onOpenAssetPacksFolder: () -> Void
     private let onReloadAssetPackIDs: () -> [String]
     private let onLoadAssetPack: (String) -> AssetPackPreviewResult
     private let onRestoreData: () -> Void
+    private let onRedeemGiftCode: (AppLanguage) -> Void
     var onSave: (AppSettings) -> Void
 
     init(
@@ -100,6 +120,7 @@ struct SettingsView: View {
         onReloadAssetPackIDs: @escaping () -> [String],
         onLoadAssetPack: @escaping (String) -> AssetPackPreviewResult,
         onRestoreData: @escaping () -> Void,
+        onRedeemGiftCode: @escaping (AppLanguage) -> Void,
         onSave: @escaping (AppSettings) -> Void
     ) {
         _draft = State(initialValue: settings)
@@ -112,6 +133,7 @@ struct SettingsView: View {
         self.onReloadAssetPackIDs = onReloadAssetPackIDs
         self.onLoadAssetPack = onLoadAssetPack
         self.onRestoreData = onRestoreData
+        self.onRedeemGiftCode = onRedeemGiftCode
         self.onSave = onSave
     }
 
@@ -181,6 +203,7 @@ struct SettingsView: View {
         }
         .padding(.top, 0)
         .padding(.horizontal, 36)
+        .offset(x: petTabVisualOffsetX)
     }
 
     @ViewBuilder
@@ -331,14 +354,15 @@ struct SettingsView: View {
     }
 
     private var aboutTab: some View {
-        VStack(spacing: 20) {
-            Text("\(strings.settingsVersionPrefix): \(appVersion)")
-                .font(.system(size: 15, weight: .semibold))
-
-            /*
-            Text("送给 77，祝你和栗子一切都好")
-                .font(.system(size: 15))
-            */
+        VStack(spacing: 24) {
+            HStack(spacing: 12) {
+                Text("\(strings.settingsVersionPrefix): \(appVersion)")
+                    .font(.system(size: 15, weight: .semibold))
+                Button(strings.settingsCheckUpdates) {
+                    NSWorkspace.shared.open(releasesURL)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
 
             VStack(spacing: 6) {
                 Text(strings.settingsAboutDescription)
@@ -396,6 +420,10 @@ struct SettingsView: View {
         URL(string: "https://github.com/Auwuua/DockCat")!
     }
 
+    private var releasesURL: URL {
+        URL(string: "https://github.com/Auwuua/DockCat/releases")!
+    }
+
     private var weChatDonationURL: URL {
         URL(string: "https://github.com/Auwuua/DockCat/blob/main/README_figs/Wechat_donate.jpg")!
     }
@@ -438,14 +466,21 @@ struct SettingsView: View {
                     }
             } else {
                 ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.fixed(92), spacing: 12), count: 4), spacing: 12) {
-                        ForEach(acquiredCollectables) { item in
-                            collectableCell(item)
+                    HStack(alignment: .top, spacing: 0) {
+                        LazyVGrid(columns: Array(repeating: GridItem(.fixed(collectableCellWidth), spacing: collectableGridSpacing), count: 4), spacing: collectableGridSpacing) {
+                            ForEach(acquiredCollectables) { item in
+                                collectableCell(item)
+                            }
                         }
+                        .frame(width: collectablesGridContentWidth, alignment: .center)
+                        Spacer()
+                            .frame(width: collectablesScrollbarGutter)
                     }
-                    .frame(width: collectablesGridWidth, alignment: .center)
+                    .frame(width: collectablesScrollableContentWidth, alignment: .leading)
                 }
-                .frame(height: 260)
+                .frame(width: collectablesGridWidth)
+                .frame(height: collectablesGridHeight)
+                .padding(.top, 8)
             }
 
             Spacer()
@@ -454,9 +489,13 @@ struct SettingsView: View {
                 Button(strings.settingsRestoreData) {
                     onRestoreData()
                 }
+                Button(strings.settingsRedeemGiftCode) {
+                    onRedeemGiftCode(draft.language)
+                }
                 Spacer()
             }
-            .frame(width: collectablesGridWidth)
+            .frame(width: collectablesGridWidth, alignment: .leading)
+            .padding(.leading, collectablesGridLeadingInset)
             .padding(.bottom, 16)
         }
         .padding(.top, 12)
@@ -491,10 +530,10 @@ struct SettingsView: View {
             )
         }
         .sorted {
-            if $0.collectable.rarity == $1.collectable.rarity {
+            if $0.collectable.raritySortRank == $1.collectable.raritySortRank {
                 return strings.collectableName($0.collectable) < strings.collectableName($1.collectable)
             }
-            return $0.collectable.rarity > $1.collectable.rarity
+            return $0.collectable.raritySortRank > $1.collectable.raritySortRank
         }
     }
 
@@ -508,7 +547,7 @@ struct SettingsView: View {
                             .stroke(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 1)
                     }
                 collectableImage(url: item.imageURL)
-                    .frame(width: 72, height: 72, alignment: .center)
+                    .frame(width: collectableImageSize, height: collectableImageSize, alignment: .center)
                 if item.isNew {
                     VStack {
                         HStack {
@@ -526,20 +565,20 @@ struct SettingsView: View {
                     }
                 }
             }
-            .frame(width: 88, height: 78)
+            .frame(width: collectableImageBackgroundSize, height: collectableImageBackgroundSize)
 
             Text(strings.collectableName(item.collectable))
                 .font(.system(size: 12))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .frame(width: 88)
-            Text(String(repeating: "★", count: item.collectable.rarity))
+                .frame(width: collectableCellWidth)
+            Text(item.collectable.isStandardRarity ? String(repeating: "★", count: item.collectable.rarity) : item.collectable.rarityLabel)
                 .font(.system(size: 11))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
-                .frame(width: 88)
+                .frame(width: collectableCellWidth)
         }
-        .frame(width: 92, height: 122)
+        .frame(width: collectableCellWidth, height: collectableCellHeight)
     }
 
     @ViewBuilder

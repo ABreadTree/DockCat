@@ -110,8 +110,8 @@ Complete example:
   "id": "my-cat",
   "name": "My Cat",
   "author": "Your Name",
-  "canvas_width": 512,
-  "canvas_height": 512,
+  "canvas_width": 1024,
+  "canvas_height": 1024,
   "default_anchor": { "x": 0.5, "y": 0.88 },
   "poses": {
     "resting": "poses/resting",
@@ -163,6 +163,8 @@ When DockCat successfully loads a valid icon pair, it copies them to:
 ```
 
 DockCat uses that cached copy as the persistent custom app icon. Replacing or updating the DockCat app does not delete the cached local icons. If a replaced app briefly shows the bundled icon while DockCat is not running, launch DockCat once and it will reapply the cached sleeping icon to the current `.app` file icon.
+
+The sleeping Dock icon is also affected by macOS Dock icon caching. DockCat can reapply the custom icon to the app bundle, but it cannot reliably force the Dock process to refresh its cached image immediately. If `icon_sleep.png` still does not appear after restarting DockCat, restart the Dock or restart your Mac.
 
 Icon files are not hot-reloaded. Restart DockCat after adding, replacing, or editing `app_icons/icon_sleep.png` or `app_icons/icon_empty.png`.
 

@@ -31,7 +31,7 @@ final class OutingCatalogLoader {
                   !item.chineseName.isEmpty,
                   !item.englishName.isEmpty,
                   !item.author.isEmpty,
-                  (1 ... 5).contains(item.rarity)
+                  item.isStandardRarity || item.isSpecialDisplayRarity
             else {
                 return false
             }

@@ -26,7 +26,7 @@ final class OutingRewardGenerator {
             return eventReward()
         }
 
-        let availableCollectables = catalog.collectables.filter { !$0.isRetired }
+        let availableCollectables = catalog.collectables.filter(\.isRewardEligible)
         let matching = availableCollectables.filter { $0.rarity == rarity }
         let candidates = matching.isEmpty ? availableCollectables.filter { $0.rarity == 1 } : matching
         guard !candidates.isEmpty else {

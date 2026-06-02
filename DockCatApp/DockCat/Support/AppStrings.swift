@@ -241,6 +241,7 @@ extension AppStrings {
     var settingsOutingDepartureMessage: String { language == .chinese ? "出门招呼文案" : "Outing message" }
     var settingsDisplayRow: String { language == .chinese ? "宠物出现在" : "Pet appears on" }
     var settingsVersionPrefix: String { language == .chinese ? "当前版本" : "Version" }
+    var settingsCheckUpdates: String { language == .chinese ? "检查更新" : "Check updates" }
     var settingsProjectPrefix: String { language == .chinese ? "项目地址：" : "Project page: " }
     var settingsDonationLead: String {
         language == .chinese ? "如果你喜欢 DockCat，欢迎赞赏支持我们：" : "If you enjoy DockCat, please consider supporting us:"
@@ -255,6 +256,16 @@ extension AppStrings {
     var settingsStatisticsSection: String { language == .chinese ? "数据统计" : "Stats" }
     var settingsNoCollectables: String { language == .chinese ? "还没有收藏品" : "No collectables yet" }
     var settingsRestoreData: String { language == .chinese ? "恢复数据" : "Restore Data" }
+    var settingsRedeemGiftCode: String { language == .chinese ? "兑换收藏品" : "Redeem Gift" }
+    var giftCodeInputTitle: String { language == .chinese ? "请输入兑换码：" : "Enter gift code:" }
+    var giftCodeInputSubtitle: String {
+        language == .chinese ? "兑换码可联系作者获取" : "Gift codes can be obtained from the author"
+    }
+    var giftCodeSubmit: String { language == .chinese ? "提交" : "Submit" }
+    var giftCodeInvalidTitle: String { language == .chinese ? "兑换码无效" : "Invalid Gift Code" }
+    var giftCodeInvalidMessage: String { language == .chinese ? "兑换码无效。" : "The gift code is invalid." }
+    var giftCodeSuccessTitle: String { language == .chinese ? "已兑换收藏品：" : "Collectable redeemed:" }
+    var giftCodeDone: String { language == .chinese ? "完成" : "Done" }
     var restoreDataConfirmTitle: String { language == .chinese ? "恢复数据" : "Restore Data" }
     var restoreDataConfirmMessage: String {
         language == .chinese

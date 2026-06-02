@@ -17,6 +17,13 @@ enum CatState: Equatable, CustomStringConvertible {
         }
     }
 
+    var isOuting: Bool {
+        if case .outing = self {
+            return true
+        }
+        return false
+    }
+
     var canBeginDrag: Bool {
         switch self {
         case .walking, .resting, .transitioning:

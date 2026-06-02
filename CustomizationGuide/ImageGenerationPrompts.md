@@ -42,8 +42,8 @@ File requirements:
 
 - File format: PNG with alpha transparency.
 - Color space: sRGB.
-- Default canvas: 512 x 512 px.
-- Runtime display target: the app preserves each PNG's source aspect ratio and renders poses at 10% of the source PNG point size by default. Users can adjust this scale percentage.
+- Default canvas: 1024 x 1024 px.
+- Runtime display target: the app preserves each PNG's source aspect ratio and renders poses at 15% of the source PNG point size by default. Users can adjust this scale percentage.
 - Padding: keep at least 8% transparent padding around the cat.
 - Anchor consistency: keep the cat's body-bottom or paw-bottom anchor visually consistent across all poses in the same asset pack.
 - Naming: use lowercase English letters, numbers, underscores, and hyphens only.
@@ -118,8 +118,8 @@ File requirements:
 
 - File format: PNG with alpha transparency.
 - Color space: sRGB.
-- Default canvas: 512 x 512 px for every frame.
-- Runtime display target: the app preserves each PNG's source aspect ratio and renders animation frames at 10% of the source PNG point size by default. Users can adjust this scale percentage.
+- Default canvas: 1024 x 1024 px for every frame.
+- Runtime display target: the app preserves each PNG's source aspect ratio and renders animation frames at 15% of the source PNG point size by default. Users can adjust this scale percentage.
 - Padding: keep at least 8% transparent padding around the cat.
 - Frame consistency: use identical canvas size, identical cat scale, consistent baseline or paw-bottom position, consistent head/body size, consistent line weight, consistent color palette, and consistent transparent padding for every frame.
 - Naming: use lowercase English letters, numbers, underscores, and hyphens only. Sortable filenames are required because the app plays every loadable image in filename order.

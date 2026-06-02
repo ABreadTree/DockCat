@@ -118,6 +118,14 @@ final class ReminderScheduler {
         nextCustomDue = nil
     }
 
+    func restartTimersFromNow() {
+        guard settings.remindersEnabled else {
+            clear()
+            return
+        }
+        resetTimers(from: now())
+    }
+
     private func resetTimers(from date: Date) {
         pendingReminder = nil
         nextWaterDue = date.addingTimeInterval(settings.waterReminderInterval)

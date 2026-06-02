@@ -150,9 +150,9 @@ struct UserDataBackupCollectableInventory: Codable, Equatable {
         self.recentNewCollectableID = recentNewCollectableID
     }
 
-    init(inventory: CollectableInventory, collectablesByID: [String: OutingCollectable] = [:]) {
+    init(inventory: CollectableInventory) {
         entries = inventory.entries.mapValues { entry in
-            UserDataBackupCollectableInventoryEntry(entry: entry, collectable: collectablesByID[entry.collectableID])
+            UserDataBackupCollectableInventoryEntry(entry: entry)
         }
         recentNewCollectableID = inventory.recentNewCollectableID
     }
@@ -163,44 +163,24 @@ struct UserDataBackupCollectableInventoryEntry: Codable, Equatable {
     var count: Int?
     var firstAcquiredAt: Date?
     var lastAcquiredAt: Date
-    var chineseName: String?
-    var englishName: String?
 
     init(
         collectableID: String,
         count: Int? = nil,
         firstAcquiredAt: Date? = nil,
-        lastAcquiredAt: Date,
-        chineseName: String? = nil,
-        englishName: String? = nil
+        lastAcquiredAt: Date
     ) {
         self.collectableID = collectableID
         self.count = count
         self.firstAcquiredAt = firstAcquiredAt
         self.lastAcquiredAt = lastAcquiredAt
-        self.chineseName = chineseName
-        self.englishName = englishName
     }
 
-    init(entry: CollectableInventoryEntry, collectable: OutingCollectable? = nil) {
+    init(entry: CollectableInventoryEntry) {
         collectableID = entry.collectableID
         count = entry.count
         firstAcquiredAt = entry.firstAcquiredAt
         lastAcquiredAt = entry.lastAcquiredAt
-        chineseName = collectable?.chineseName
-        englishName = collectable?.englishName
-    }
-
-    func displayName(fallbackID: String) -> String {
-        let name = chineseName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let name, !name.isEmpty {
-            return name
-        }
-        let englishName = englishName?.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let englishName, !englishName.isEmpty {
-            return englishName
-        }
-        return fallbackID
     }
 }
 
@@ -266,10 +246,8 @@ final class UserDataBackupStore {
     func save(
         settings: AppSettings,
         usageStatistics: UsageStatistics,
-        collectableInventory: CollectableInventory,
-        outingCatalog: OutingCatalog = .empty
+        collectableInventory: CollectableInventory
     ) {
-        let collectablesByID = Dictionary(outingCatalog.collectables.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         let snapshot = UserDataBackupSnapshot(
             schemaVersion: 2,
             generatedAt: now(),
@@ -277,10 +255,7 @@ final class UserDataBackupStore {
             bundleIdentifier: bundleIdentifierProvider(),
             settings: UserDataBackupSettings(settings: settings),
             usageStatistics: usageStatistics,
-            collectableInventory: UserDataBackupCollectableInventory(
-                inventory: collectableInventory,
-                collectablesByID: collectablesByID
-            )
+            collectableInventory: UserDataBackupCollectableInventory(inventory: collectableInventory)
         )
 
         do {
@@ -321,7 +296,7 @@ final class UserDataBackupStore {
                 throw UserDataBackupRestoreError.invalidCollectableEntry(key)
             }
             guard collectablesByID[collectableID] != nil else {
-                skippedNames.append(backupEntry.displayName(fallbackID: collectableID))
+                skippedNames.append(collectableID)
                 continue
             }
 
