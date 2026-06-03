@@ -66,16 +66,18 @@ Windows 用户可以查看[社区移植版本](https://github.com/yitian-ma/Dock
 - DockCat 允许加载不完整的自定义资源包来方便你预览效果，缺失或加载失败的资源类型会自动用默认小猫填充，避免屏幕上出现一只隐形猫猫。
 - 同一种状态文件夹里的小猫图可以任意增加。当小猫进入任何一种非散步状态时，DockCat 会从相应文件夹的可用图片中随机抽取一张来呈现，所以你甚至可以为小猫的一种状态设计很多种样子。散步状态则会把可用的图片按顺序呈现为循环动画。
 
-如果你在创造或加载自己的资源包时需要帮助，或者想要试试下面展示的其他用户制作的资源包，可以在下方的 [支持和联系我们](#支持和联系我们) 找到我们的联系方式。
+如果你在创造或加载自己的资源包时需要帮助，或者想要试试下面展示的其他用户制作的资源包，可以在下方的 [支持和联系我们](#支持和联系我们) 找到我们的联系方式。我们为分享自制资源包的主人准备了专属收藏品哦！
 
 <table>
   <tr>
-    <td align="center"><img src="README_figs/gaolegao.png" alt="糕乐糕" width="180"></td>
-    <td align="center"><img src="README_figs/xiangxiang.png" alt="想想" width="180"></td>
+    <td align="center"><img src="README_figs/gaolegao.png" alt="糕乐糕" width="160"></td>
+    <td align="center"><img src="README_figs/xiangxiang.png" alt="想想" width="160"></td>
+    <td align="center"><img src="README_figs/eleven.png" alt="十一" width="160"></td>
   </tr>
   <tr>
     <td align="center">糕乐糕</td>
     <td align="center">想想</td>
+    <td align="center">十一</td>
   </tr>
 </table>
 
