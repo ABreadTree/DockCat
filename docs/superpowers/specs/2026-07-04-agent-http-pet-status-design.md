@@ -33,6 +33,7 @@ Minimal JSON payload:
 ```json
 {
   "agent": "codex",
+  "session": "task-123",
   "status": "working",
   "message": "Updating tests",
   "hint": "I am checking the build now."
@@ -42,6 +43,7 @@ Minimal JSON payload:
 Fields:
 
 - `agent`: required non-empty string, displayed in fallback messages.
+- `session`: optional non-empty string. When present, DockCat uses `agent + session` to coalesce repeated low-priority updates from the same task.
 - `status`: required string, one of `working`, `success`, `failure`, `waiting`, `info`.
 - `message`: optional string, trimmed and capped before display.
 - `hint`: optional string. When present, it is preferred as the speech bubble text.
@@ -86,8 +88,9 @@ Priority behavior:
 - `failure` and `waiting` may interrupt resting, walking, transition, `working`, `success`, and `info` agent presentations.
 - `working`, `success`, and `info` may interrupt resting and walking only.
 - Protected interactions are never interrupted by agent events.
-- When a low-priority event arrives during a protected interaction, DockCat may keep only the latest pending low-priority event and drop older low-priority events.
+- When a low-priority event arrives during a protected interaction, DockCat keeps only the latest pending low-priority event for the same `agent + session` key and drops older low-priority events for that key.
 - A high-priority `failure` or `waiting` received during a protected interaction is held as the next pending event and shown after the protected interaction finishes.
+- The total pending queue is capped at five events. If it is full, DockCat drops the oldest low-priority event before dropping a high-priority event.
 
 This keeps agent feedback visible without stealing user-driven DockCat flows.
 
