@@ -100,8 +100,8 @@ struct AppSettings: Codable, Equatable {
 
     static let defaults = AppSettings(
         language: .chinese,
-        catName: "栗子",
-        catIdentifier: "Lizz",
+        catName: "小猴",
+        catIdentifier: "Xiaohou",
         userSalutation: "妈妈",
         selectedAssetPackID: "default-lizz",
         remindersEnabled: true,
@@ -134,8 +134,8 @@ struct AppSettings: Codable, Equatable {
         case .english:
             return AppSettings(
                 language: .english,
-                catName: "Lizz",
-                catIdentifier: "Lizz",
+                catName: "Xiaohou",
+                catIdentifier: "Xiaohou",
                 userSalutation: "Mom",
                 selectedAssetPackID: "default-lizz",
                 remindersEnabled: true,

@@ -1,1 +1,8 @@
 .worktrees/
+.DS_Store
+DockCatApp/DerivedDataRelease/
+DockCat 2.zip
+DockCat-Xiaohou-*.zip
+xiaohou/Photo/
+xiaohou/generated_sources/
+xiaohou/qa/

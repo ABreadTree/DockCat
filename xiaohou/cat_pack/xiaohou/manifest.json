@@ -1,0 +1,27 @@
+{
+  "id": "xiaohou",
+  "name": "Xiaohou",
+  "author": "Niqk",
+  "canvas_width": 1024,
+  "canvas_height": 1024,
+  "default_anchor": {
+    "x": 0.5,
+    "y": 0.88
+  },
+  "poses": {
+    "resting": "poses/resting",
+    "held": "poses/held",
+    "dialogue": "poses/dialogue",
+    "transition": "poses/transition"
+  },
+  "animations": {
+    "walk": {
+      "fps": 3,
+      "frames": []
+    }
+  },
+  "app_icons": {
+    "sleep": "app_icons/icon_sleep.png",
+    "empty": "app_icons/icon_empty.png"
+  }
+}

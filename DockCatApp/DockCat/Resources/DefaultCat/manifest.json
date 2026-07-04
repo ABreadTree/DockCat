@@ -1,18 +1,18 @@
 {
   "id": "default-lizz",
-  "name": "Lizz",
-  "author": "Auwuua",
-  "canvas_width": 1280,
-  "canvas_height": 1280,
+  "name": "Xiaohou",
+  "author": "Niqk",
+  "canvas_width": 1024,
+  "canvas_height": 1024,
   "default_anchor": {
     "x": 0.5,
     "y": 0.88
   },
   "poses": {
-    "resting": "poses/resting",
-    "held": "poses/held",
-    "dialogue": "poses/dialogue",
-    "transition": "poses/transition"
+    "resting": "poses/resting-xiaohou",
+    "held": "poses/held-xiaohou",
+    "dialogue": "poses/dialogue-xiaohou",
+    "transition": "poses/transition-xiaohou"
   },
   "animations": {
     "walk": {

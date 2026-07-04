@@ -15,6 +15,9 @@ README_EN_PATH="README.en.md"
 LICENSE_PATH="LICENSE.txt"
 CUSTOMIZATION_GUIDE_PATH="CustomizationGuide"
 ZIP_PATH="DockCat.zip"
+PACKAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dockcat-package.XXXXXX")"
+SIGNED_APP_PATH="$PACKAGE_DIR/DockCat.app"
+trap 'rm -rf "$PACKAGE_DIR"' EXIT
 
 echo "Clean building DockCat for packaging..."
 xcodebuild \
@@ -24,6 +27,7 @@ xcodebuild \
   -derivedDataPath "$DERIVED_DATA" \
   ONLY_ACTIVE_ARCH=NO \
   ARCHS="arm64 x86_64" \
+  CODE_SIGNING_ALLOWED=NO \
   clean build
 
 if [[ ! -d "$APP_PATH" ]]; then
@@ -43,6 +47,12 @@ if [[ " $ARCHS_OUTPUT " != *" arm64 "* || " $ARCHS_OUTPUT " != *" x86_64 "* ]]; 
   echo "DockCat executable is not universal. Found architectures: $ARCHS_OUTPUT"
   exit 1
 fi
+
+echo "Preparing clean signed app for local distribution..."
+ditto --norsrc "$APP_PATH" "$SIGNED_APP_PATH"
+xattr -cr "$SIGNED_APP_PATH"
+codesign --force --deep --sign - "$SIGNED_APP_PATH"
+codesign --verify --deep --strict "$SIGNED_APP_PATH"
 
 if [[ ! -f "$README_PATH" ]]; then
   echo "README.md was not found."
@@ -64,11 +74,7 @@ if [[ ! -d "$CUSTOMIZATION_GUIDE_PATH" ]]; then
   exit 1
 fi
 
-PACKAGE_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dockcat-package.XXXXXX")"
-trap 'rm -rf "$PACKAGE_DIR"' EXIT
-
 echo "Preparing release package..."
-ditto --norsrc "$APP_PATH" "$PACKAGE_DIR/DockCat.app"
 cp "$README_PATH" "$PACKAGE_DIR/README.md"
 cp "$README_EN_PATH" "$PACKAGE_DIR/README.en.md"
 cp "$LICENSE_PATH" "$PACKAGE_DIR/LICENSE.txt"
