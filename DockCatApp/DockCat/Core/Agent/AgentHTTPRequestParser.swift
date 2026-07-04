@@ -7,27 +7,30 @@ struct AgentHTTPRequest {
 struct AgentHTTPResponse: Equatable {
     let statusCode: Int
 
+    init(statusCode: Int) {
+        switch statusCode {
+        case 204, 400, 404, 405:
+            self.statusCode = statusCode
+        default:
+            self.statusCode = 500
+        }
+    }
+
     var data: Data {
-        let responseCode: Int
         let reason: String
         switch statusCode {
         case 204:
-            responseCode = 204
             reason = "No Content"
         case 400:
-            responseCode = 400
             reason = "Bad Request"
         case 404:
-            responseCode = 404
             reason = "Not Found"
         case 405:
-            responseCode = 405
             reason = "Method Not Allowed"
         default:
-            responseCode = 500
             reason = "Internal Server Error"
         }
-        return "HTTP/1.1 \(responseCode) \(reason)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".data(using: .utf8)!
+        return "HTTP/1.1 \(statusCode) \(reason)\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".data(using: .utf8)!
     }
 }
 
