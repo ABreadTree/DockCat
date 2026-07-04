@@ -6,6 +6,9 @@ enum CatActivityScope: String, Codable, Equatable, Hashable, CaseIterable {
 }
 
 struct AppSettings: Codable, Equatable {
+    private static let defaultAssetPackID = "default-xiaohou"
+    private static let legacyDefaultAssetPackID = "default-lizz"
+
     var language: AppLanguage
     var catName: String
     var catIdentifier: String
@@ -100,10 +103,10 @@ struct AppSettings: Codable, Equatable {
 
     static let defaults = AppSettings(
         language: .chinese,
-        catName: "栗子",
-        catIdentifier: "Lizz",
+        catName: "小猴",
+        catIdentifier: "Xiaohou",
         userSalutation: "妈妈",
-        selectedAssetPackID: "default-lizz",
+        selectedAssetPackID: defaultAssetPackID,
         remindersEnabled: true,
         waterReminderInterval: 30 * 60,
         waterReminderMessageSuffix: "该喝水啦",
@@ -134,10 +137,10 @@ struct AppSettings: Codable, Equatable {
         case .english:
             return AppSettings(
                 language: .english,
-                catName: "Lizz",
-                catIdentifier: "Lizz",
+                catName: "Xiaohou",
+                catIdentifier: "Xiaohou",
                 userSalutation: "Mom",
-                selectedAssetPackID: "default-lizz",
+                selectedAssetPackID: defaultAssetPackID,
                 remindersEnabled: true,
                 waterReminderInterval: 30 * 60,
                 waterReminderMessageSuffix: "time to drink some water.",
@@ -226,7 +229,16 @@ struct AppSettings: Codable, Equatable {
         catName = try container.decodeIfPresent(String.self, forKey: .catName) ?? defaults.catName
         catIdentifier = try container.decodeIfPresent(String.self, forKey: .catIdentifier) ?? defaults.catIdentifier
         userSalutation = try container.decodeIfPresent(String.self, forKey: .userSalutation) ?? defaults.userSalutation
-        selectedAssetPackID = try container.decodeIfPresent(String.self, forKey: .selectedAssetPackID) ?? defaults.selectedAssetPackID
+        let decodedAssetPackID = try container.decodeIfPresent(String.self, forKey: .selectedAssetPackID)
+        selectedAssetPackID = Self.normalizedAssetPackID(decodedAssetPackID ?? defaults.selectedAssetPackID)
+        if decodedAssetPackID == Self.legacyDefaultAssetPackID {
+            if catName == Self.legacyDefaultCatName(for: language) {
+                catName = defaults.catName
+            }
+            if catIdentifier == "Lizz" {
+                catIdentifier = defaults.catIdentifier
+            }
+        }
         remindersEnabled = try container.decodeIfPresent(Bool.self, forKey: .remindersEnabled) ?? defaults.remindersEnabled
         waterReminderInterval = try container.decodeIfPresent(TimeInterval.self, forKey: .waterReminderInterval) ?? defaults.waterReminderInterval
         waterReminderMessageSuffix = try container.decodeIfPresent(String.self, forKey: .waterReminderMessageSuffix) ?? defaults.waterReminderMessageSuffix
@@ -310,5 +322,18 @@ struct AppSettings: Codable, Equatable {
         }
 
         return value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? fallback : value
+    }
+
+    private static func normalizedAssetPackID(_ id: String) -> String {
+        id == legacyDefaultAssetPackID ? defaultAssetPackID : id
+    }
+
+    private static func legacyDefaultCatName(for language: AppLanguage) -> String {
+        switch language {
+        case .chinese:
+            return "栗子"
+        case .english:
+            return "Lizz"
+        }
     }
 }

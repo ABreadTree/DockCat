@@ -30,7 +30,8 @@ struct AssetPackValidationReport {
 }
 
 final class AssetPackLoader {
-    private static let defaultPackID = "default-lizz"
+    private static let defaultPackID = "default-xiaohou"
+    private static let legacyDefaultPackID = "default-lizz"
 
     private let fileManager: FileManager
     private let bundle: Bundle
@@ -44,7 +45,7 @@ final class AssetPackLoader {
 
     func loadSelectedPack(selectedID: String) -> CatAssetPack {
         prepareCustomPacksDirectory()
-        if selectedID == Self.defaultPackID {
+        if Self.isBundledDefaultPackID(selectedID) {
             return loadDefaultPack()
         }
         if let custom = customPacks(allowIncomplete: true).first(where: { $0.id == selectedID }) {
@@ -61,16 +62,22 @@ final class AssetPackLoader {
         }
 
         let fallbackManifest = AssetManifest(
-            id: "default-lizz",
-            name: "Lizz",
-            author: "Auwuua",
-            canvasWidth: 1280,
-            canvasHeight: 1280,
+            id: Self.defaultPackID,
+            name: "Xiaohou",
+            author: "Niqk",
+            canvasWidth: 1024,
+            canvasHeight: 1024,
             defaultAnchor: .init(x: 0.5, y: 0.88),
-            poses: .init(resting: "poses/resting", held: "poses/held", dialogue: "poses/dialogue", transition: "poses/transition"),
+            poses: .init(
+                resting: "poses/resting-xiaohou",
+                held: "poses/held-xiaohou",
+                dialogue: "poses/dialogue-xiaohou",
+                transition: "poses/transition-xiaohou"
+            ),
             animations: .init(
-                walk: .init(fps: 3, frames: [])
-            )
+                walk: .init(fps: 3, frames: Self.defaultXiaohouWalkFramePaths())
+            ),
+            appIcons: .init(sleep: "app_icons/icon_sleep.png", empty: "app_icons/icon_empty.png")
         )
         return CatAssetPack(manifest: fallbackManifest, rootURL: defaultPackCandidates().first ?? URL(fileURLWithPath: "/"))
     }
@@ -150,7 +157,7 @@ final class AssetPackLoader {
             )
         }
 
-        if trimmedID == Self.defaultPackID {
+        if Self.isBundledDefaultPackID(trimmedID) {
             let pack = loadDefaultPack()
             return validationReport(requestedID: trimmedID, pack: pack)
         }
@@ -256,7 +263,7 @@ final class AssetPackLoader {
     private func syncDefaultPackBackup(to customRoot: URL) {
         let destination = customRoot.appendingPathComponent(Self.defaultPackID, isDirectory: true)
         guard let source = defaultPackCandidates().first(where: { isDirectory($0) }) else {
-            DockCatLog.assets.error("Failed to seed default-lizz because bundled DefaultCat was not found")
+            DockCatLog.assets.error("Failed to seed default-xiaohou because bundled DefaultCat was not found")
             return
         }
         do {
@@ -265,7 +272,7 @@ final class AssetPackLoader {
             }
             try fileManager.copyItem(at: source, to: destination)
         } catch {
-            DockCatLog.assets.error("Failed to refresh default-lizz backup: \(error.localizedDescription)")
+            DockCatLog.assets.error("Failed to refresh default-xiaohou backup: \(error.localizedDescription)")
         }
     }
 
@@ -288,7 +295,7 @@ final class AssetPackLoader {
                 try fileManager.copyItem(at: source, to: destination)
             }
         } catch {
-            DockCatLog.assets.error("Failed to seed default-lizz app icons: \(error.localizedDescription)")
+            DockCatLog.assets.error("Failed to seed default-xiaohou app icons: \(error.localizedDescription)")
         }
         repairDefaultPackManifestIconsIfNeeded(at: defaultPackRoot)
     }
@@ -297,15 +304,15 @@ final class AssetPackLoader {
         let manifestURL = root.appendingPathComponent("manifest.json")
         guard fileManager.fileExists(atPath: manifestURL.path),
               let manifest = try? JSONDecoder().decode(AssetManifest.self, from: Data(contentsOf: manifestURL)),
-              isDefaultLizzManifest(manifest),
+              isDefaultXiaohouManifest(manifest),
               manifest.appIcons == nil
         else {
             return
         }
         do {
-            try defaultLizzManifestData(withAppIcons: true).write(to: manifestURL, options: .atomic)
+            try defaultXiaohouManifestData(withAppIcons: true).write(to: manifestURL, options: .atomic)
         } catch {
-            DockCatLog.assets.error("Failed to repair default-lizz manifest app icons: \(error.localizedDescription)")
+            DockCatLog.assets.error("Failed to repair default-xiaohou manifest app icons: \(error.localizedDescription)")
         }
     }
 
@@ -375,58 +382,75 @@ final class AssetPackLoader {
             && manifest.appIcons == .init(sleep: "app_icons/icon_sleep.png", empty: "app_icons/icon_empty.png")
     }
 
-    private func isDefaultLizzManifest(_ manifest: AssetManifest) -> Bool {
-        manifest.id == "default-lizz"
-            && manifest.name == "Lizz"
-            && manifest.author == "Auwuua"
-            && manifest.canvasWidth == 1280
-            && manifest.canvasHeight == 1280
+    private func isDefaultXiaohouManifest(_ manifest: AssetManifest) -> Bool {
+        manifest.id == Self.defaultPackID
+            && manifest.name == "Xiaohou"
+            && manifest.author == "Niqk"
+            && manifest.canvasWidth == 1024
+            && manifest.canvasHeight == 1024
             && manifest.defaultAnchor == .init(x: 0.5, y: 0.88)
             && manifest.poses == .init(
-                resting: "poses/resting",
-                held: "poses/held",
-                dialogue: "poses/dialogue",
-                transition: "poses/transition"
+                resting: "poses/resting-xiaohou",
+                held: "poses/held-xiaohou",
+                dialogue: "poses/dialogue-xiaohou",
+                transition: "poses/transition-xiaohou"
             )
-            && manifest.animations == .init(walk: .init(fps: 3, frames: []))
+            && manifest.animations == .init(walk: .init(fps: 3, frames: Self.defaultXiaohouWalkFramePaths()))
     }
 
-    private func defaultLizzManifestData(withAppIcons: Bool) throws -> Data {
+    private func defaultXiaohouManifestData(withAppIcons: Bool) throws -> Data {
         let iconsBlock = withAppIcons ? """
           },
           "app_icons": {
             "sleep": "app_icons/icon_sleep.png",
             "empty": "app_icons/icon_empty.png"
         """ : """
-          }
         """
         return Data("""
         {
-          "id": "default-lizz",
-          "name": "Lizz",
-          "author": "Auwuua",
-          "canvas_width": 1280,
-          "canvas_height": 1280,
+          "id": "default-xiaohou",
+          "name": "Xiaohou",
+          "author": "Niqk",
+          "canvas_width": 1024,
+          "canvas_height": 1024,
           "default_anchor": {
             "x": 0.5,
             "y": 0.88
           },
           "poses": {
-            "resting": "poses/resting",
-            "held": "poses/held",
-            "dialogue": "poses/dialogue",
-            "transition": "poses/transition"
+            "resting": "poses/resting-xiaohou",
+            "held": "poses/held-xiaohou",
+            "dialogue": "poses/dialogue-xiaohou",
+            "transition": "poses/transition-xiaohou"
           },
           "animations": {
             "walk": {
               "fps": 3,
-              "frames": []
+              "frames": [
+                "animations/walk-xiaohou/walk_01.png",
+                "animations/walk-xiaohou/walk_02.png",
+                "animations/walk-xiaohou/walk_03.png",
+                "animations/walk-xiaohou/walk_04.png"
+              ]
             }
         \(iconsBlock)
           }
         }
 
         """.utf8)
+    }
+
+    private static func isBundledDefaultPackID(_ id: String) -> Bool {
+        id == defaultPackID || id == legacyDefaultPackID
+    }
+
+    private static func defaultXiaohouWalkFramePaths() -> [String] {
+        [
+            "animations/walk-xiaohou/walk_01.png",
+            "animations/walk-xiaohou/walk_02.png",
+            "animations/walk-xiaohou/walk_03.png",
+            "animations/walk-xiaohou/walk_04.png"
+        ]
     }
 
     private func templateContainsNoLoadableImages(at root: URL) -> Bool {
@@ -538,6 +562,16 @@ final class AssetPackLoader {
     }
 
     private func loadableWalkFrameURLs(in pack: CatAssetPack) -> [URL] {
+        let manifestFrameURLs = pack.manifest.animations.walk.frames
+            .map { pack.url(for: $0) }
+            .filter { url in
+                let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+                return values?.isRegularFile == true && NSImage(contentsOf: url) != nil
+            }
+        if !manifestFrameURLs.isEmpty {
+            return manifestFrameURLs
+        }
+
         guard let urls = try? fileManager.contentsOfDirectory(
             at: pack.walkAnimationDirectoryURL,
             includingPropertiesForKeys: [.isRegularFileKey],

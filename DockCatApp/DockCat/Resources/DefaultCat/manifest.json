@@ -1,23 +1,32 @@
 {
-  "id": "default-lizz",
-  "name": "Lizz",
-  "author": "Auwuua",
-  "canvas_width": 1280,
-  "canvas_height": 1280,
+  "id": "default-xiaohou",
+  "name": "Xiaohou",
+  "author": "Niqk",
+  "canvas_width": 1024,
+  "canvas_height": 1024,
   "default_anchor": {
     "x": 0.5,
     "y": 0.88
   },
   "poses": {
-    "resting": "poses/resting",
-    "held": "poses/held",
-    "dialogue": "poses/dialogue",
-    "transition": "poses/transition"
+    "resting": "poses/resting-xiaohou",
+    "held": "poses/held-xiaohou",
+    "dialogue": "poses/dialogue-xiaohou",
+    "transition": "poses/transition-xiaohou"
   },
   "animations": {
     "walk": {
       "fps": 3,
-      "frames": []
+      "frames": [
+        "animations/walk-xiaohou/walk_01.png",
+        "animations/walk-xiaohou/walk_02.png",
+        "animations/walk-xiaohou/walk_03.png",
+        "animations/walk-xiaohou/walk_04.png"
+      ]
     }
+  },
+  "app_icons": {
+    "sleep": "app_icons/icon_sleep.png",
+    "empty": "app_icons/icon_empty.png"
   }
 }
