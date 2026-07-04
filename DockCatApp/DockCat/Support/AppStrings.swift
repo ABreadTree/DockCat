@@ -101,12 +101,12 @@ struct AppStrings {
         case (.chinese, .success): return "\(agent) 完成了\(suffix)"
         case (.chinese, .failure): return "\(agent) 需要注意\(suffix)"
         case (.chinese, .waiting): return "\(agent) 正在等待\(suffix)"
-        case (.chinese, .info): return "\(agent)\(suffix)"
+        case (.chinese, .info): return "\(agent) 有新消息\(suffix)"
         case (.english, .working): return "\(agent) is working\(suffix)"
         case (.english, .success): return "\(agent) finished\(suffix)"
         case (.english, .failure): return "\(agent) needs attention\(suffix)"
         case (.english, .waiting): return "\(agent) is waiting\(suffix)"
-        case (.english, .info): return "\(agent)\(suffix)"
+        case (.english, .info): return "\(agent) has an update\(suffix)"
         }
     }
 
