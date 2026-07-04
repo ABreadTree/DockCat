@@ -42,4 +42,10 @@ final class AgentHTTPRequestParserTests: XCTestCase {
 
         XCTAssertEqual(AgentHTTPRequestParser.response(for: request).statusCode, 400)
     }
+
+    func testUnknownResponseStatusDefaultsToInternalServerError() {
+        let response = String(decoding: AgentHTTPResponse(statusCode: 418).data, as: UTF8.self)
+
+        XCTAssertTrue(response.hasPrefix("HTTP/1.1 500 Internal Server Error\r\n"))
+    }
 }
