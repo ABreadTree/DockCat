@@ -41,12 +41,11 @@ enum AgentHTTPRequestParser {
     }
 
     static func parse(_ data: Data) throws -> AgentHTTPRequest {
-        let request = String(decoding: data, as: UTF8.self)
-        guard let headerRange = request.range(of: "\r\n\r\n") else {
+        guard let delimiterRange = data.range(of: Data([13, 10, 13, 10])) else {
             throw ParseError.badRequest
         }
 
-        let header = String(request[..<headerRange.lowerBound])
+        let header = String(decoding: data[..<delimiterRange.lowerBound], as: UTF8.self)
         let lines = header.components(separatedBy: "\r\n")
         guard let requestLine = lines.first else { throw ParseError.badRequest }
         let parts = requestLine.split(separator: " ")
@@ -54,18 +53,25 @@ enum AgentHTTPRequestParser {
         guard parts[0] == "POST" else { throw ParseError.methodNotAllowed }
         guard parts[1] == "/agent-events" else { throw ParseError.notFound }
 
-        let contentLength = lines.dropFirst().compactMap { line -> Int? in
+        let contentLengthValues = lines.dropFirst().compactMap { line -> String? in
             let pieces = line.split(separator: ":", maxSplits: 1).map(String.init)
-            guard pieces.count == 2, pieces[0].lowercased() == "content-length" else { return nil }
-            return Int(pieces[1].trimmingCharacters(in: .whitespacesAndNewlines))
-        }.first ?? 0
+            guard pieces.count == 2 else { return nil }
+            let name = pieces[0].trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard name == "content-length" else { return nil }
+            return pieces[1].trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        guard contentLengthValues.count == 1,
+              let contentLength = Int(contentLengthValues[0]),
+              (0...maxBodyBytes).contains(contentLength) else {
+            throw ParseError.badRequest
+        }
 
-        guard contentLength <= maxBodyBytes else { throw ParseError.badRequest }
-
-        let bodyStart = headerRange.upperBound
-        let body = String(request[bodyStart...])
-        guard body.utf8.count >= contentLength else { throw ParseError.badRequest }
-        let bodyData = Data(body.utf8.prefix(contentLength))
+        let bodyStart = delimiterRange.upperBound
+        guard data.distance(from: bodyStart, to: data.endIndex) >= contentLength else {
+            throw ParseError.badRequest
+        }
+        let bodyEnd = data.index(bodyStart, offsetBy: contentLength)
+        let bodyData = data[bodyStart..<bodyEnd]
         return AgentHTTPRequest(agentEvent: try AgentEvent.decode(from: bodyData))
     }
 
