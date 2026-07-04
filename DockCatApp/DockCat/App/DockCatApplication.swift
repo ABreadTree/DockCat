@@ -42,6 +42,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private var agentHTTPServer: AgentHTTPServer?
     private var agentEventQueue = AgentEventQueue()
     private var activeAgentPresentation: AgentPresentation?
+    private var activeAgentPresentationToken = 0
     private var agentPresentationTimer: Timer?
     private var agentPatrolTimer: Timer?
     private var agentResumeTimer: Timer?
@@ -989,8 +990,8 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         return activeAgentPresentation?.priority == .low && presentation.priority == .high
     }
 
-    private func isActiveAgentPresentation(_ presentation: AgentPresentation) -> Bool {
-        activeAgentPresentation == presentation
+    private func isActiveAgentPresentation(token: Int) -> Bool {
+        activeAgentPresentation != nil && activeAgentPresentationToken == token
     }
 
     private var isProtectedAgentInteraction: Bool {
@@ -1000,6 +1001,8 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     }
 
     private func showAgentPresentation(_ presentation: AgentPresentation) {
+        activeAgentPresentationToken += 1
+        let token = activeAgentPresentationToken
         activeAgentPresentation = presentation
         agentPresentationTimer?.invalidate()
         agentPatrolTimer?.invalidate()
@@ -1011,19 +1014,19 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
 
         switch presentation.action {
         case .smallPatrol:
-            showAgentSmallPatrol(presentation)
+            showAgentSmallPatrol(presentation, token: token)
         case .comfortableFinish:
-            showAgentDialogue(presentation, duration: 3.0)
+            showAgentDialogue(presentation, duration: 3.0, token: token)
         case .seriousAlert:
-            showAgentDialogue(presentation, duration: 8.0)
+            showAgentDialogue(presentation, duration: 8.0, token: token)
         case .waitForUser:
-            showAgentDialogue(presentation, duration: nil)
+            showAgentDialogue(presentation, duration: nil, token: token)
         case .turnToNotice:
-            showAgentDialogue(presentation, duration: 3.0)
+            showAgentDialogue(presentation, duration: 3.0, token: token)
         }
     }
 
-    private func showAgentSmallPatrol(_ presentation: AgentPresentation) {
+    private func showAgentSmallPatrol(_ presentation: AgentPresentation, token: Int) {
         let animation = renderer.animationFrames(\.walk)
         let sourceSize = stableWalkSourceSize()
         walkDirection = Bool.random() ? 1 : -1
@@ -1034,23 +1037,24 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         walkAnimator.start(animation: animation) { [weak self, animation] frameIndex in
             Task { @MainActor in
                 guard let self else { return }
-                guard self.isActiveAgentPresentation(presentation) else { return }
+                guard self.isActiveAgentPresentation(token: token) else { return }
                 self.catWindow.setImage(animation.frames[frameIndex], mirrored: self.walkDirection < 0, sourceSize: sourceSize)
             }
         }
         agentPatrolTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
-                guard self.isActiveAgentPresentation(presentation) else { return }
+                guard self.isActiveAgentPresentation(token: token) else { return }
                 self.stopWalk()
-                self.showAgentDialogue(presentation, duration: 3.0)
+                self.showAgentDialogue(presentation, duration: 3.0, token: token)
             }
         }
     }
 
     private func showAgentDialogue(
         _ presentation: AgentPresentation,
-        duration: TimeInterval?
+        duration: TimeInterval?,
+        token: Int
     ) {
         let showRestingPose = presentation.action == .comfortableFinish
         let pose = renderer.randomPose(for: .dialogue)
@@ -1063,8 +1067,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             primaryTitle: strings.ok,
             onPrimary: { [weak self] in
                 guard let self else { return }
-                guard self.isActiveAgentPresentation(presentation) else { return }
+                guard self.isActiveAgentPresentation(token: token) else { return }
                 self.finishAgentPresentation(
+                    token: token,
                     resumeWhenIdle: true,
                     showRestingPose: showRestingPose
                 )
@@ -1074,8 +1079,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             agentPresentationTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     guard let self else { return }
-                    guard self.isActiveAgentPresentation(presentation) else { return }
+                    guard self.isActiveAgentPresentation(token: token) else { return }
                     self.finishAgentPresentation(
+                        token: token,
                         resumeWhenIdle: true,
                         showRestingPose: showRestingPose
                     )
@@ -1092,7 +1098,12 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         catWindow.show(at: point)
     }
 
-    private func finishAgentPresentation(resumeWhenIdle: Bool = true, showRestingPose: Bool = false) {
+    private func finishAgentPresentation(
+        token: Int,
+        resumeWhenIdle: Bool = true,
+        showRestingPose: Bool = false
+    ) {
+        guard isActiveAgentPresentation(token: token) else { return }
         agentPresentationTimer?.invalidate()
         agentPresentationTimer = nil
         agentPatrolTimer?.invalidate()
@@ -1121,11 +1132,13 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         guard stateMachine.state.isLongDuration, !isProtectedAgentInteraction else {
             return
         }
+        let token = activeAgentPresentationToken
         agentResumeTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
                 self.agentResumeTimer = nil
                 guard self.activeAgentPresentation == nil,
+                      self.activeAgentPresentationToken == token,
                       self.stateMachine.state.isLongDuration,
                       !self.isProtectedAgentInteraction else {
                     return
@@ -1434,6 +1447,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     }
 
     private func petCat() {
+        guard activeAgentPresentation == nil else { return }
         switch stateMachine.state {
         case .resting:
             let pose = renderer.randomPose(for: .resting, fallback: .dialogue)
