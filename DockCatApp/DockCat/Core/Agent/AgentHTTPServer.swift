@@ -151,8 +151,13 @@ private final class AgentHTTPServerState: @unchecked Sendable {
                 break
             }
 
+            guard isRunning(listenerSocket: listenerSocket, generation: generation) else {
+                closeSocket(connection)
+                continue
+            }
+
             configureConnectionSocket(connection)
-            guard let activeConnection = addActiveConnection(connection) else {
+            guard let activeConnection = addActiveConnection(connection, listenerGeneration: generation) else {
                 closeSocket(connection)
                 continue
             }
@@ -280,10 +285,14 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         _ = setsockopt(socket, SOL_SOCKET, option, &value, socklen_t(MemoryLayout<Int32>.size))
     }
 
-    private func addActiveConnection(_ connection: Int32) -> ActiveConnection? {
+    private func addActiveConnection(_ connection: Int32, listenerGeneration generation: UInt64) -> ActiveConnection? {
         lock.lock()
         defer { lock.unlock() }
-        guard running, activeConnections.count < Self.maxActiveConnections else { return nil }
+        guard running,
+              listenerGeneration == generation,
+              activeConnections.count < Self.maxActiveConnections else {
+            return nil
+        }
         connectionGeneration &+= 1
         let activeConnection = ActiveConnection(socket: connection, generation: connectionGeneration)
         activeConnections.insert(activeConnection)
