@@ -10,7 +10,7 @@ enum AgentHTTPRequestBufferResult: Equatable {
 struct AgentHTTPRequestBuffer {
     private static let headerDelimiter = Data([13, 10, 13, 10])
     private static let maxHeaderBytes = 2048
-    private static let maxRequestBytes = AgentHTTPRequestParser.maxBodyBytes + maxHeaderBytes
+    private static let maxRequestBytes = AgentHTTPRequestParser.maxBodyBytes + maxHeaderBytes + headerDelimiter.count
 
     private var data = Data()
 
@@ -122,10 +122,9 @@ private final class AgentHTTPServerState: @unchecked Sendable {
                 case .ready:
                     self.running = true
                 case .cancelled, .failed:
+                    guard self.listener === listener else { return }
                     self.running = false
-                    if self.listener === listener {
-                        self.listener = nil
-                    }
+                    self.listener = nil
                 default:
                     break
                 }
@@ -149,6 +148,11 @@ private final class AgentHTTPServerState: @unchecked Sendable {
     }
 
     private func handle(_ connection: NWConnection) {
+        guard running, listener != nil else {
+            connection.cancel()
+            return
+        }
+
         let id = ObjectIdentifier(connection)
         activeConnections[id] = connection
         requestBuffers[id] = AgentHTTPRequestBuffer()
