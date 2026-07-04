@@ -197,10 +197,14 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             )
         )
         stateMachine.onTransition = { [weak self] _, newState in
-            self?.stateScheduler.cancel()
-            self?.stopWalk()
-            self?.stateEndDate = nil
-            self?.applyState(newState)
+            guard let self else { return }
+            self.stateScheduler.cancel()
+            self.stopWalk()
+            self.stateEndDate = nil
+            self.applyState(newState)
+            if newState.isLongDuration {
+                self.showNextQueuedAgentPresentationIfPossible()
+            }
         }
         stateMachine.onDurationScheduled = { [weak self] state, duration in
             self?.stateEndDate = Date().addingTimeInterval(duration)
@@ -1036,7 +1040,6 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         _ presentation: AgentPresentation,
         duration: TimeInterval?
     ) {
-        let resumeWhenIdle = presentation.action != .comfortableFinish
         let showRestingPose = presentation.action == .comfortableFinish
         let pose = renderer.randomPose(for: .dialogue)
         let point = clampedCatPoint(stateMachine.position)
@@ -1048,7 +1051,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             primaryTitle: strings.ok,
             onPrimary: { [weak self] in
                 self?.finishAgentPresentation(
-                    resumeWhenIdle: resumeWhenIdle,
+                    resumeWhenIdle: true,
                     showRestingPose: showRestingPose
                 )
             }
@@ -1057,7 +1060,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             agentPresentationTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
                 Task { @MainActor in
                     self?.finishAgentPresentation(
-                        resumeWhenIdle: resumeWhenIdle,
+                        resumeWhenIdle: true,
                         showRestingPose: showRestingPose
                     )
                 }
