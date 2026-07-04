@@ -15,6 +15,11 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
     var onOpenAssetPacksFolder: () -> Void = {}
     var onRestoreData: (() -> Void)?
     var onRedeemGiftCode: ((AppLanguage) -> Void)?
+    var agentBridgeSnapshotProvider: () -> AgentBridgeSnapshot = { .empty }
+    var onRefreshAgentBridge: () -> AgentBridgeSnapshot = { .empty }
+    var onEnableAllAgentBridges: (Int) -> AgentBridgeSnapshot = { _ in .empty }
+    var onSetAgentBridgeEnabled: (AgentBridgeAgentID, Bool, Int) -> AgentBridgeSnapshot = { _, _, _ in .empty }
+    var onTestAgentBridge: (AgentBridgeAgentID) -> AgentBridgeActionResult = { _ in .failure("Agent bridge is not ready.") }
     var onLoadAssetPack: (String) -> AssetPackPreviewResult = { id in
         AssetPackPreviewResult(
             report: AssetPackValidationReport(
@@ -82,7 +87,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
         let hosting = NSHostingController(rootView: view)
         let window = NSWindow(contentViewController: hosting)
         window.title = AppStrings(language: settings.language).settingsWindowTitle
-        window.setContentSize(NSSize(width: 520, height: 580))
+        window.setContentSize(NSSize(width: 560, height: 600))
         window.styleMask = [.titled, .closable, .miniaturizable]
         window.level = NSWindow.Level(rawValue: NSWindow.Level.floating.rawValue + 1)
         window.collectionBehavior = [.canJoinAllSpaces]
@@ -106,6 +111,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             collectableInventory: collectableInventory,
             dialogueImage: dialogueImage,
             availableAssetPackIDs: assetPackIDsProvider(),
+            agentBridgeSnapshot: agentBridgeSnapshotProvider(),
             onOpenAssetPacksFolder: onOpenAssetPacksFolder,
             onReloadAssetPackIDs: assetPackIDsProvider,
             onLoadAssetPack: onLoadAssetPack,
@@ -114,6 +120,18 @@ final class SettingsWindowController: NSObject, NSWindowDelegate {
             },
             onRedeemGiftCode: { [weak self] language in
                 self?.onRedeemGiftCode?(language)
+            },
+            onRefreshAgentBridge: { [weak self] in
+                self?.onRefreshAgentBridge() ?? .empty
+            },
+            onEnableAllAgentBridges: { [weak self] port in
+                self?.onEnableAllAgentBridges(port) ?? .empty
+            },
+            onSetAgentBridgeEnabled: { [weak self] agent, enabled, port in
+                self?.onSetAgentBridgeEnabled(agent, enabled, port) ?? .empty
+            },
+            onTestAgentBridge: { [weak self] agent in
+                self?.onTestAgentBridge(agent) ?? .failure("Agent bridge is not ready.")
             }
         ) { [weak self] updated in
             guard let self else { return }

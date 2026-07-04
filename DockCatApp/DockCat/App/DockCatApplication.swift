@@ -40,6 +40,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private var startupTimer: Timer?
     private var walkMovementTimer: Timer?
     private var agentHTTPServer: AgentHTTPServer?
+    private var agentBridgeManager: AgentBridgeManager?
     private var agentEventQueue = AgentEventQueue()
     private var activeAgentPresentation: AgentPresentation?
     private var activeAgentPresentationToken = 0
@@ -83,7 +84,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             collectableInventory: collectableInventory,
             dialogueImage: renderer.randomPose(for: .dialogue).image
         )
+        agentBridgeManager = try? AgentBridgeManager.live()
         configureSettingsAssetPackActions()
+        configureSettingsAgentBridgeActions()
         catWindow.setImageScale(percent: settings.catScalePercent)
         configureStateMachine()
         configureInteraction()
@@ -301,6 +304,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             let point = shouldResetPosition ? self.startPositionAnchor() : self.clampedCatPoint(self.stateMachine.position)
             self.updateCurrentPositionPreservingState(point)
             self.updateStateMachineParameters()
+            self.configureAgentHTTPServer()
             self.saveUserDataBackup()
         }
     }
@@ -349,6 +353,82 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
                 PoseRenderer(pack: $0, fallbackPack: self.defaultAssetPack).randomPose(for: .dialogue).image
             } ?? self.renderer.randomPose(for: .dialogue).image
             return AssetPackPreviewResult(report: report, dialogueImage: previewImage)
+        }
+    }
+
+    private func configureSettingsAgentBridgeActions() {
+        settingsWindowController.agentBridgeSnapshotProvider = { [weak self] in
+            self?.agentBridgeSnapshot() ?? .empty
+        }
+        settingsWindowController.onRefreshAgentBridge = { [weak self] in
+            self?.agentBridgeSnapshot() ?? .empty
+        }
+        settingsWindowController.onEnableAllAgentBridges = { [weak self] port in
+            self?.enableAllAgentBridges(port: port) ?? .empty
+        }
+        settingsWindowController.onSetAgentBridgeEnabled = { [weak self] agent, enabled, port in
+            self?.setAgentBridge(agent, enabled: enabled, port: port) ?? .empty
+        }
+        settingsWindowController.onTestAgentBridge = { [weak self] agent in
+            self?.testAgentBridge(agent) ?? .failure("Agent bridge is not ready.")
+        }
+    }
+
+    private func agentBridgeSnapshot() -> AgentBridgeSnapshot {
+        guard let agentBridgeManager else { return .empty }
+        return agentBridgeManager.snapshot(
+            settings: settings,
+            serverRunning: agentHTTPServer?.isRunning == true
+        )
+    }
+
+    private func enableAllAgentBridges(port: Int) -> AgentBridgeSnapshot {
+        guard let agentBridgeManager else { return .empty }
+        let normalizedPort = AppSettings.normalizedAgentHTTPPort(port)
+        let detectedAgents = agentBridgeManager
+            .snapshot(settings: settings, serverRunning: agentHTTPServer?.isRunning == true)
+            .agents
+            .filter { $0.status == .detected || $0.status == .enabled }
+            .map(\.agent)
+
+        for agent in detectedAgents {
+            let result = agentBridgeManager.enable(agent, port: normalizedPort)
+            RuntimeDiagnostics.record("agent bridge enable all \(agent.rawValue) success=\(result.succeeded) message=\(result.message)")
+            if result.succeeded {
+                settings.agentBridge[keyPath: agent.settingsKeyPath].enabled = true
+                settings.agentHTTPPort = normalizedPort
+            }
+        }
+        settingsStore.save(settings)
+        settingsWindowController.update(settings: settings)
+        return agentBridgeSnapshot()
+    }
+
+    private func setAgentBridge(_ agent: AgentBridgeAgentID, enabled: Bool, port: Int) -> AgentBridgeSnapshot {
+        guard let agentBridgeManager else { return .empty }
+        let normalizedPort = AppSettings.normalizedAgentHTTPPort(port)
+        let result = enabled ? agentBridgeManager.enable(agent, port: normalizedPort) : agentBridgeManager.disable(agent)
+        RuntimeDiagnostics.record("agent bridge set \(agent.rawValue) enabled=\(enabled) success=\(result.succeeded) message=\(result.message)")
+        if result.succeeded {
+            settings.agentBridge[keyPath: agent.settingsKeyPath].enabled = enabled
+            settings.agentHTTPPort = normalizedPort
+            settingsStore.save(settings)
+            settingsWindowController.update(settings: settings)
+        }
+        return agentBridgeSnapshot()
+    }
+
+    private func testAgentBridge(_ agent: AgentBridgeAgentID) -> AgentBridgeActionResult {
+        guard let agentBridgeManager else {
+            return .failure("Agent bridge is not ready.")
+        }
+        do {
+            let payload = try agentBridgeManager.testEventPayload(agent: agent)
+            let event = try AgentEvent.decode(from: payload)
+            receiveAgentEvent(event)
+            return .success("\(agent.displayName) test event sent.")
+        } catch {
+            return .failure("\(agent.displayName) test failed: \(error.localizedDescription)")
         }
     }
 
@@ -964,13 +1044,27 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     }
 
     private func configureAgentHTTPServer() {
-        let server = AgentHTTPServer { [weak self] event in
+        agentHTTPServer?.stop()
+        agentHTTPServer = nil
+
+        guard settings.agentHTTPEnabled else {
+            RuntimeDiagnostics.record("agent http disabled")
+            return
+        }
+
+        let port = UInt16(AppSettings.normalizedAgentHTTPPort(settings.agentHTTPPort))
+        let server = AgentHTTPServer(port: port) { [weak self] event in
             Task { @MainActor in
                 self?.receiveAgentEvent(event)
             }
         }
         agentHTTPServer = server
         server.start()
+        if let error = server.lastStartError {
+            RuntimeDiagnostics.record("agent http failed port=\(port) error=\(error)")
+        } else {
+            RuntimeDiagnostics.record("agent http started port=\(port)")
+        }
     }
 
     private func receiveAgentEvent(_ event: AgentEvent) {

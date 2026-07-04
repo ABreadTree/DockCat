@@ -5,6 +5,26 @@ enum CatActivityScope: String, Codable, Equatable, Hashable, CaseIterable {
     case desktop
 }
 
+struct AgentBridgeAgentSetting: Codable, Equatable {
+    var enabled: Bool
+
+    static let disabled = AgentBridgeAgentSetting(enabled: false)
+}
+
+struct AgentBridgeSettings: Codable, Equatable {
+    var codex: AgentBridgeAgentSetting
+    var claudeCode: AgentBridgeAgentSetting
+    var hermes: AgentBridgeAgentSetting
+    var openClaw: AgentBridgeAgentSetting
+
+    static let defaults = AgentBridgeSettings(
+        codex: .disabled,
+        claudeCode: .disabled,
+        hermes: .disabled,
+        openClaw: .disabled
+    )
+}
+
 struct AppSettings: Codable, Equatable {
     private static let defaultAssetPackID = "default-xiaohou"
     private static let legacyDefaultAssetPackID = "default-lizz"
@@ -35,6 +55,9 @@ struct AppSettings: Codable, Equatable {
     var activityDisplayID: UInt32?
     var activeOutingEndDate: Date?
     var activeOutingDuration: TimeInterval?
+    var agentHTTPEnabled: Bool
+    var agentHTTPPort: Int
+    var agentBridge: AgentBridgeSettings
 
     func reminderMessageSuffix(for type: ReminderType) -> String {
         switch type {
@@ -94,6 +117,9 @@ struct AppSettings: Codable, Equatable {
         case activityDisplayID
         case activeOutingEndDate
         case activeOutingDuration
+        case agentHTTPEnabled
+        case agentHTTPPort
+        case agentBridge
     }
 
     enum LegacyCodingKeys: String, CodingKey {
@@ -127,7 +153,10 @@ struct AppSettings: Codable, Equatable {
         catActivityScope: .dockEdge,
         activityDisplayID: nil,
         activeOutingEndDate: nil,
-        activeOutingDuration: nil
+        activeOutingDuration: nil,
+        agentHTTPEnabled: true,
+        agentHTTPPort: 8765,
+        agentBridge: .defaults
     )
 
     static func defaults(for language: AppLanguage) -> AppSettings {
@@ -161,7 +190,10 @@ struct AppSettings: Codable, Equatable {
                 catActivityScope: .dockEdge,
                 activityDisplayID: nil,
                 activeOutingEndDate: nil,
-                activeOutingDuration: nil
+                activeOutingDuration: nil,
+                agentHTTPEnabled: true,
+                agentHTTPPort: 8765,
+                agentBridge: .defaults
             )
         }
     }
@@ -192,7 +224,10 @@ struct AppSettings: Codable, Equatable {
         catActivityScope: CatActivityScope,
         activityDisplayID: UInt32?,
         activeOutingEndDate: Date?,
-        activeOutingDuration: TimeInterval?
+        activeOutingDuration: TimeInterval?,
+        agentHTTPEnabled: Bool,
+        agentHTTPPort: Int,
+        agentBridge: AgentBridgeSettings
     ) {
         self.language = language
         self.catName = catName
@@ -220,6 +255,9 @@ struct AppSettings: Codable, Equatable {
         self.activityDisplayID = activityDisplayID
         self.activeOutingEndDate = activeOutingEndDate
         self.activeOutingDuration = activeOutingDuration
+        self.agentHTTPEnabled = agentHTTPEnabled
+        self.agentHTTPPort = agentHTTPPort
+        self.agentBridge = agentBridge
     }
 
     init(from decoder: Decoder) throws {
@@ -269,6 +307,10 @@ struct AppSettings: Codable, Equatable {
         activityDisplayID = try container.decodeIfPresent(UInt32.self, forKey: .activityDisplayID)
         activeOutingEndDate = try container.decodeIfPresent(Date.self, forKey: .activeOutingEndDate)
         activeOutingDuration = try container.decodeIfPresent(TimeInterval.self, forKey: .activeOutingDuration)
+        agentHTTPEnabled = try container.decodeIfPresent(Bool.self, forKey: .agentHTTPEnabled) ?? defaults.agentHTTPEnabled
+        let decodedAgentHTTPPort = try container.decodeIfPresent(Int.self, forKey: .agentHTTPPort) ?? defaults.agentHTTPPort
+        agentHTTPPort = Self.normalizedAgentHTTPPort(decodedAgentHTTPPort, fallback: defaults.agentHTTPPort)
+        agentBridge = try container.decodeIfPresent(AgentBridgeSettings.self, forKey: .agentBridge) ?? defaults.agentBridge
     }
 
     func encode(to encoder: Encoder) throws {
@@ -299,6 +341,9 @@ struct AppSettings: Codable, Equatable {
         try container.encodeIfPresent(activityDisplayID, forKey: .activityDisplayID)
         try container.encodeIfPresent(activeOutingEndDate, forKey: .activeOutingEndDate)
         try container.encodeIfPresent(activeOutingDuration, forKey: .activeOutingDuration)
+        try container.encode(agentHTTPEnabled, forKey: .agentHTTPEnabled)
+        try container.encode(agentHTTPPort, forKey: .agentHTTPPort)
+        try container.encode(agentBridge, forKey: .agentBridge)
     }
 
     static func normalizedOutingDepartureMessageSuffix(
@@ -326,6 +371,10 @@ struct AppSettings: Codable, Equatable {
 
     private static func normalizedAssetPackID(_ id: String) -> String {
         id == legacyDefaultAssetPackID ? defaultAssetPackID : id
+    }
+
+    static func normalizedAgentHTTPPort(_ port: Int, fallback: Int = 8765) -> Int {
+        (1...65_535).contains(port) ? port : fallback
     }
 
     private static func legacyDefaultCatName(for language: AppLanguage) -> String {

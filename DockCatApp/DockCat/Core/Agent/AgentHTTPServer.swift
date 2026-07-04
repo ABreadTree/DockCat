@@ -43,10 +43,17 @@ struct AgentHTTPRequestBuffer {
     }
 }
 
+enum AgentHTTPServerStartError: Equatable {
+    case socketFailed
+    case bindFailed
+    case listenFailed
+}
+
 final class AgentHTTPServer {
     private let state: AgentHTTPServerState
 
     var isRunning: Bool { state.isRunning }
+    var lastStartError: AgentHTTPServerStartError? { state.lastStartError }
 
     init(port: UInt16 = 8765, onEvent: @escaping @Sendable (AgentEvent) -> Void) {
         state = AgentHTTPServerState(port: port, onEvent: onEvent)
@@ -82,12 +89,19 @@ private final class AgentHTTPServerState: @unchecked Sendable {
     private var listenerGeneration: UInt64 = 0
     private var connectionGeneration: UInt64 = 0
     private var running = false
+    private var startError: AgentHTTPServerStartError?
     private var activeConnections: Set<ActiveConnection> = []
 
     var isRunning: Bool {
         lock.lock()
         defer { lock.unlock() }
         return running
+    }
+
+    var lastStartError: AgentHTTPServerStartError? {
+        lock.lock()
+        defer { lock.unlock() }
+        return startError
     }
 
     init(port: UInt16, onEvent: @escaping @Sendable (AgentEvent) -> Void) {
@@ -101,7 +115,10 @@ private final class AgentHTTPServerState: @unchecked Sendable {
             lock.unlock()
             return
         }
-        guard let socket = makeListenerSocket() else {
+        startError = nil
+        let listener = makeListenerSocket()
+        guard let socket = listener.socket else {
+            startError = listener.error
             lock.unlock()
             return
         }
@@ -234,11 +251,11 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         }
     }
 
-    private func makeListenerSocket() -> Int32? {
+    private func makeListenerSocket() -> (socket: Int32?, error: AgentHTTPServerStartError?) {
         let socket = Darwin.socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         guard socket >= 0 else {
             DockCatLog.app.error("\(self.posixErrorMessage("socket"))")
-            return nil
+            return (nil, .socketFailed)
         }
 
         setEnabledSocketOption(SO_REUSEADDR, on: socket)
@@ -258,16 +275,16 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         guard bindResult == 0 else {
             DockCatLog.app.error("\(self.posixErrorMessage("bind"))")
             closeSocket(socket)
-            return nil
+            return (nil, .bindFailed)
         }
 
         guard Darwin.listen(socket, 8) == 0 else {
             DockCatLog.app.error("\(self.posixErrorMessage("listen"))")
             closeSocket(socket)
-            return nil
+            return (nil, .listenFailed)
         }
 
-        return socket
+        return (socket, nil)
     }
 
     private func configureConnectionSocket(_ socket: Int32) {

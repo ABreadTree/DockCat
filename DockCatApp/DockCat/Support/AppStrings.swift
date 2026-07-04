@@ -229,6 +229,7 @@ struct AppStrings {
 extension AppStrings {
     var settingsPetTab: String { language == .chinese ? "宠物设置" : "Pet" }
     var settingsParametersTab: String { language == .chinese ? "参数设置" : "Parameters" }
+    var settingsAgentsTab: String { language == .chinese ? "Agent 接入" : "Agents" }
     var settingsCollectablesTab: String { language == .chinese ? "收藏品箱" : "Collectables" }
     var settingsAboutTab: String { language == .chinese ? "支持" : "Support" }
     var settingsSave: String { language == .chinese ? "保存" : "Save" }
@@ -256,6 +257,21 @@ extension AppStrings {
     var settingsWalkSpeed: String { language == .chinese ? "散步基础速度" : "Walk speed" }
     var settingsOutingDepartureMessage: String { language == .chinese ? "出门招呼文案" : "Outing message" }
     var settingsDisplayRow: String { language == .chinese ? "宠物出现在" : "Pet appears on" }
+    var settingsAgentServerSection: String { language == .chinese ? "本地 HTTP" : "Local HTTP" }
+    var settingsAgentBridgeSection: String { language == .chinese ? "Agent 链路" : "Agent links" }
+    var settingsAgentHTTPEnabled: String { language == .chinese ? "开启接入" : "Enable" }
+    var settingsAgentHTTPPort: String { language == .chinese ? "端口" : "Port" }
+    var settingsAgentServerStatus: String { language == .chinese ? "状态" : "Status" }
+    var settingsAgentServerRunning: String { language == .chinese ? "运行中" : "Running" }
+    var settingsAgentServerStopped: String { language == .chinese ? "未运行" : "Stopped" }
+    var settingsAgentHelperMissing: String { language == .chinese ? "helper 尚未安装" : "Helper not installed" }
+    var settingsAgentRefresh: String { language == .chinese ? "刷新" : "Refresh" }
+    var settingsAgentEnableAllDetected: String { language == .chinese ? "启用全部" : "Enable all" }
+    var settingsAgentEnableAllDone: String { language == .chinese ? "已处理检测到的 Agent。" : "Detected agents updated." }
+    var settingsAgentEnable: String { language == .chinese ? "启用" : "Enable" }
+    var settingsAgentDisable: String { language == .chinese ? "禁用" : "Disable" }
+    var settingsAgentSendTest: String { language == .chinese ? "测试" : "Test" }
+    var settingsAgentBridgeUnavailable: String { language == .chinese ? "暂无可显示 Agent" : "No agents to show" }
     var settingsVersionPrefix: String { language == .chinese ? "当前版本" : "Version" }
     var settingsCheckUpdates: String { language == .chinese ? "检查更新" : "Check updates" }
     var settingsProjectPrefix: String { language == .chinese ? "项目地址：" : "Project page: " }
@@ -306,6 +322,21 @@ extension AppStrings {
     var assetPackValidationSuccessTitle: String { language == .chinese ? "加载校验结果" : "Asset pack check" }
     var assetPackValidationFailureTitle: String { language == .chinese ? "资源包加载失败" : "Asset pack failed" }
     var assetPackAlertOK: String { language == .chinese ? "好" : "OK" }
+
+    func agentBridgeStatus(_ status: AgentBridgeStatus) -> String {
+        switch (language, status) {
+        case (.chinese, .notInstalled): return "未安装"
+        case (.chinese, .detected): return "已检测"
+        case (.chinese, .enabled): return "已启用"
+        case (.chinese, .migrated): return "需迁移"
+        case (.chinese, .failed): return "失败"
+        case (.english, .notInstalled): return "Not installed"
+        case (.english, .detected): return "Detected"
+        case (.english, .enabled): return "Enabled"
+        case (.english, .migrated): return "Migration needed"
+        case (.english, .failed): return "Failed"
+        }
+    }
 
     func usageHours(_ hours: String) -> String {
         switch language {
