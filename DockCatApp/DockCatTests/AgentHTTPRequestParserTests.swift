@@ -1,4 +1,5 @@
 import XCTest
+import Darwin
 @testable import DockCat
 
 final class AgentHTTPRequestParserTests: XCTestCase {
@@ -6,6 +7,36 @@ final class AgentHTTPRequestParserTests: XCTestCase {
         let server = AgentHTTPServer(port: 8765) { _ in }
 
         XCTAssertFalse(server.isRunning)
+    }
+
+    func testServerAcceptsLoopbackAgentEvent() throws {
+        let port: UInt16 = 18765
+        let eventStore = CapturedAgentEvent()
+        let server = AgentHTTPServer(port: port) { event in
+            eventStore.set(event)
+        }
+
+        server.start()
+        defer { server.stop() }
+
+        guard waitUntil(timeout: 2.0, condition: { server.isRunning }) else {
+            XCTFail("AgentHTTPServer did not start listening")
+            return
+        }
+
+        let body = #"{"agent":"codex","session":"manual","status":"info","message":"hello"}"#
+        let request = makeRequest(headers: ["Content-Length: \(body.utf8.count)"], body: body)
+
+        let response = try sendLoopbackRequest(port: port, request: request)
+
+        XCTAssertTrue(String(decoding: response, as: UTF8.self).hasPrefix("HTTP/1.1 204 No Content\r\n"))
+        XCTAssertTrue(waitUntil(timeout: 1.0) {
+            eventStore.value != nil
+        })
+        let event = eventStore.value
+        XCTAssertEqual(event?.agent, "codex")
+        XCTAssertEqual(event?.session, "manual")
+        XCTAssertEqual(event?.status, .info)
     }
 
     func testRequestBufferWaitsForSplitBodyBytes() {
@@ -130,5 +161,69 @@ final class AgentHTTPRequestParserTests: XCTestCase {
     ) -> Data {
         let headerLines = ([method + " " + path + " HTTP/1.1"] + headers).joined(separator: "\r\n")
         return (headerLines + "\r\n\r\n" + body).data(using: .utf8)!
+    }
+
+    private func waitUntil(timeout: TimeInterval, condition: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            Thread.sleep(forTimeInterval: 0.01)
+        }
+        return condition()
+    }
+
+    private func sendLoopbackRequest(port: UInt16, request: Data) throws -> Data {
+        let fileDescriptor = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        XCTAssertGreaterThanOrEqual(fileDescriptor, 0)
+        defer { close(fileDescriptor) }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(port).bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        let connected = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                connect(fileDescriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        XCTAssertEqual(connected, 0)
+
+        request.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            var bytesSent = 0
+            while bytesSent < rawBuffer.count {
+                let result = send(fileDescriptor, baseAddress.advanced(by: bytesSent), rawBuffer.count - bytesSent, 0)
+                XCTAssertGreaterThan(result, 0)
+                bytesSent += result
+            }
+        }
+
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = recv(fileDescriptor, &buffer, buffer.count, 0)
+            if count <= 0 { break }
+            response.append(buffer, count: count)
+        }
+        return response
+    }
+}
+
+private final class CapturedAgentEvent: @unchecked Sendable {
+    private let lock = NSLock()
+    private var event: AgentEvent?
+
+    var value: AgentEvent? {
+        lock.lock()
+        defer { lock.unlock() }
+        return event
+    }
+
+    func set(_ event: AgentEvent) {
+        lock.lock()
+        self.event = event
+        lock.unlock()
     }
 }

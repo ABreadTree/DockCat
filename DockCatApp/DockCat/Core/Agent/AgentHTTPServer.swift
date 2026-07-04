@@ -1,5 +1,5 @@
+import Darwin
 import Foundation
-@preconcurrency import Network
 
 enum AgentHTTPRequestBufferResult: Equatable {
     case needsMoreData
@@ -64,135 +64,119 @@ final class AgentHTTPServer {
 private final class AgentHTTPServerState: @unchecked Sendable {
     private let port: UInt16
     private let onEvent: @Sendable (AgentEvent) -> Void
-    private let queue = DispatchQueue(label: "DockCat.AgentHTTPServer")
-    private let queueKey = DispatchSpecificKey<Void>()
+    private let lock = NSLock()
 
-    private var listener: NWListener?
+    private var listenerSocket: Int32 = -1
     private var running = false
-    private var activeConnections: [ObjectIdentifier: NWConnection] = [:]
-    private var requestBuffers: [ObjectIdentifier: AgentHTTPRequestBuffer] = [:]
+    private var activeConnections: Set<Int32> = []
 
     var isRunning: Bool {
-        if DispatchQueue.getSpecific(key: queueKey) != nil {
-            return running
-        }
-        return queue.sync { running }
+        lock.lock()
+        defer { lock.unlock() }
+        return running
     }
 
     init(port: UInt16, onEvent: @escaping @Sendable (AgentEvent) -> Void) {
         self.port = port
         self.onEvent = onEvent
-        queue.setSpecific(key: queueKey, value: ())
     }
 
     func start() {
-        queue.async { [weak self] in
-            self?.startOnQueue()
+        lock.lock()
+        guard !running, listenerSocket < 0 else {
+            lock.unlock()
+            return
+        }
+        guard let socket = makeListenerSocket() else {
+            lock.unlock()
+            return
+        }
+        listenerSocket = socket
+        running = true
+        lock.unlock()
+
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            self?.acceptLoop(listenerSocket: socket)
         }
     }
 
     func stop() {
-        if DispatchQueue.getSpecific(key: queueKey) != nil {
-            stopOnQueue()
-        } else {
-            queue.sync {
-                stopOnQueue()
+        lock.lock()
+        let socket = listenerSocket
+        let connections = Array(activeConnections)
+        listenerSocket = -1
+        activeConnections.removeAll()
+        running = false
+        lock.unlock()
+
+        closeSocket(socket)
+        connections.forEach(closeSocket)
+    }
+
+    private func acceptLoop(listenerSocket: Int32) {
+        defer { finishListenerIfCurrent(listenerSocket) }
+
+        while isRunning(listenerSocket: listenerSocket) {
+            var address = sockaddr_storage()
+            var addressLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
+            let connection = withUnsafeMutablePointer(to: &address) { pointer in
+                pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                    Darwin.accept(listenerSocket, socketAddress, &addressLength)
+                }
             }
+
+            if connection < 0 {
+                if errno == EINTR {
+                    continue
+                }
+                if isRunning(listenerSocket: listenerSocket) {
+                    DockCatLog.app.error("\(self.posixErrorMessage("accept"))")
+                }
+                break
+            }
+
+            guard addActiveConnection(connection) else {
+                closeSocket(connection)
+                continue
+            }
+            configureConnectionSocket(connection)
+            handleConnection(connection)
+            closeConnection(connection)
         }
     }
 
-    private func startOnQueue() {
-        guard listener == nil else { return }
-        guard let nwPort = NWEndpoint.Port(rawValue: port),
-              let loopback = IPv4Address("127.0.0.1") else {
-            return
-        }
+    private func handleConnection(_ connection: Int32) {
+        var requestBuffer = AgentHTTPRequestBuffer()
+        var buffer = [UInt8](repeating: 0, count: 4096)
 
-        do {
-            let parameters = NWParameters.tcp
-            parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopback), port: nwPort)
-
-            let listener = try NWListener(using: parameters, on: nwPort)
-            listener.newConnectionHandler = { [weak self, weak listener] connection in
-                guard let listener else {
-                    connection.cancel()
+        while isActiveConnection(connection) {
+            let count = Darwin.recv(connection, &buffer, buffer.count, 0)
+            if count > 0 {
+                let chunk = Data(buffer[0..<count])
+                switch requestBuffer.append(chunk) {
+                case .needsMoreData:
+                    continue
+                case .ready(let requestData):
+                    respond(to: requestData, on: connection)
+                    return
+                case .badRequest:
+                    sendResponse(AgentHTTPResponse(statusCode: 400), on: connection)
                     return
                 }
-                self?.handle(connection, for: listener)
-            }
-            listener.stateUpdateHandler = { [weak self] state in
-                guard let self else { return }
-                guard self.listener === listener else { return }
-                switch state {
-                case .ready:
-                    self.running = true
-                case .cancelled, .failed:
-                    self.running = false
-                    self.listener = nil
-                default:
-                    break
+            } else if count == 0 {
+                return
+            } else if errno == EINTR {
+                continue
+            } else {
+                if errno == EAGAIN || errno == EWOULDBLOCK {
+                    sendResponse(AgentHTTPResponse(statusCode: 400), on: connection)
                 }
-            }
-            listener.start(queue: queue)
-            self.listener = listener
-        } catch {
-            running = false
-            listener = nil
-            DockCatLog.app.error("Failed to start agent HTTP server: \(error.localizedDescription)")
-        }
-    }
-
-    private func stopOnQueue() {
-        listener?.cancel()
-        listener = nil
-        running = false
-        activeConnections.values.forEach { $0.cancel() }
-        activeConnections.removeAll()
-        requestBuffers.removeAll()
-    }
-
-    private func handle(_ connection: NWConnection, for listener: NWListener) {
-        guard running, self.listener === listener else {
-            connection.cancel()
-            return
-        }
-
-        let id = ObjectIdentifier(connection)
-        activeConnections[id] = connection
-        requestBuffers[id] = AgentHTTPRequestBuffer()
-        connection.start(queue: queue)
-        receive(on: connection, id: id)
-    }
-
-    private func receive(on connection: NWConnection, id: ObjectIdentifier) {
-        connection.receive(
-            minimumIncompleteLength: 1,
-            maximumLength: AgentHTTPRequestParser.maxBodyBytes + 2048
-        ) { [weak self] data, _, isComplete, _ in
-            guard let self else { return }
-            guard self.activeConnections[id] != nil else { return }
-            guard let data, !data.isEmpty else {
-                self.close(connection, id: id)
                 return
             }
-
-            let result = self.requestBuffers[id]?.append(data) ?? .badRequest
-            switch result {
-            case .needsMoreData:
-                if isComplete {
-                    self.send(AgentHTTPResponse(statusCode: 400), on: connection, id: id)
-                } else {
-                    self.receive(on: connection, id: id)
-                }
-            case .ready(let requestData):
-                self.respond(to: requestData, on: connection, id: id)
-            case .badRequest:
-                self.send(AgentHTTPResponse(statusCode: 400), on: connection, id: id)
-            }
         }
     }
 
-    private func respond(to data: Data, on connection: NWConnection, id: ObjectIdentifier) {
+    private func respond(to data: Data, on connection: Int32) {
         let response: AgentHTTPResponse
         do {
             let request = try AgentHTTPRequestParser.parse(data)
@@ -202,20 +186,124 @@ private final class AgentHTTPServerState: @unchecked Sendable {
             response = Self.response(for: error)
         }
 
-        send(response, on: connection, id: id)
+        sendResponse(response, on: connection)
     }
 
-    private func send(_ response: AgentHTTPResponse, on connection: NWConnection, id: ObjectIdentifier) {
-        guard activeConnections[id] != nil else { return }
-        connection.send(content: response.data, completion: .contentProcessed { [weak self] _ in
-            self?.close(connection, id: id)
-        })
+    private func sendResponse(_ response: AgentHTTPResponse, on connection: Int32) {
+        response.data.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            var bytesSent = 0
+            while bytesSent < rawBuffer.count {
+                let result = Darwin.send(connection, baseAddress.advanced(by: bytesSent), rawBuffer.count - bytesSent, 0)
+                if result > 0 {
+                    bytesSent += result
+                } else if errno == EINTR {
+                    continue
+                } else {
+                    return
+                }
+            }
+        }
     }
 
-    private func close(_ connection: NWConnection, id: ObjectIdentifier) {
-        requestBuffers[id] = nil
-        activeConnections[id] = nil
-        connection.cancel()
+    private func makeListenerSocket() -> Int32? {
+        let socket = Darwin.socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        guard socket >= 0 else {
+            DockCatLog.app.error("\(self.posixErrorMessage("socket"))")
+            return nil
+        }
+
+        setEnabledSocketOption(SO_REUSEADDR, on: socket)
+        setEnabledSocketOption(SO_NOSIGPIPE, on: socket)
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = in_port_t(port).bigEndian
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        let bindResult = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                Darwin.bind(socket, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        guard bindResult == 0 else {
+            DockCatLog.app.error("\(self.posixErrorMessage("bind"))")
+            closeSocket(socket)
+            return nil
+        }
+
+        guard Darwin.listen(socket, 8) == 0 else {
+            DockCatLog.app.error("\(self.posixErrorMessage("listen"))")
+            closeSocket(socket)
+            return nil
+        }
+
+        return socket
+    }
+
+    private func configureConnectionSocket(_ socket: Int32) {
+        setEnabledSocketOption(SO_NOSIGPIPE, on: socket)
+
+        var timeout = timeval(tv_sec: 2, tv_usec: 0)
+        withUnsafePointer(to: &timeout) { pointer in
+            _ = setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, pointer, socklen_t(MemoryLayout<timeval>.size))
+            _ = setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, pointer, socklen_t(MemoryLayout<timeval>.size))
+        }
+    }
+
+    private func setEnabledSocketOption(_ option: Int32, on socket: Int32) {
+        var value: Int32 = 1
+        _ = setsockopt(socket, SOL_SOCKET, option, &value, socklen_t(MemoryLayout<Int32>.size))
+    }
+
+    private func addActiveConnection(_ connection: Int32) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard running else { return false }
+        activeConnections.insert(connection)
+        return true
+    }
+
+    private func closeConnection(_ connection: Int32) {
+        lock.lock()
+        let shouldClose = activeConnections.remove(connection) != nil
+        lock.unlock()
+
+        if shouldClose {
+            closeSocket(connection)
+        }
+    }
+
+    private func isActiveConnection(_ connection: Int32) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return activeConnections.contains(connection)
+    }
+
+    private func isRunning(listenerSocket socket: Int32) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return running && listenerSocket == socket
+    }
+
+    private func finishListenerIfCurrent(_ socket: Int32) {
+        lock.lock()
+        let shouldClose = listenerSocket == socket
+        if shouldClose {
+            listenerSocket = -1
+            running = false
+        }
+        lock.unlock()
+
+        if shouldClose {
+            closeSocket(socket)
+        }
+    }
+
+    private func posixErrorMessage(_ operation: String) -> String {
+        let errorNumber = errno
+        return "\(operation) failed: \(String(cString: strerror(errorNumber)))"
     }
 
     private static func response(for error: Error) -> AgentHTTPResponse {
@@ -228,4 +316,10 @@ private final class AgentHTTPServerState: @unchecked Sendable {
             return AgentHTTPResponse(statusCode: 400)
         }
     }
+}
+
+private func closeSocket(_ socket: Int32) {
+    guard socket >= 0 else { return }
+    _ = Darwin.shutdown(socket, SHUT_RDWR)
+    _ = Darwin.close(socket)
 }
