@@ -123,10 +123,10 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         listenerGeneration &+= 1
         listenerSocket = -1
         running = false
+        connections.forEach(shutdownSocket)
         lock.unlock()
 
         closeSocket(socket)
-        connections.forEach(shutdownSocket)
     }
 
     private func acceptLoop(listenerSocket: Int32, generation: UInt64) {
