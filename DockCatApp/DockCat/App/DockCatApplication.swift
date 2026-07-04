@@ -44,6 +44,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private var activeAgentPresentation: AgentPresentation?
     private var agentPresentationTimer: Timer?
     private var agentPatrolTimer: Timer?
+    private var agentResumeTimer: Timer?
     private var stateEndDate: Date?
     private var walkDirection: CGFloat = 1
     private var pendingOutingDuration: TimeInterval?
@@ -115,6 +116,8 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         agentHTTPServer?.stop()
         agentPresentationTimer?.invalidate()
         agentPatrolTimer?.invalidate()
+        agentResumeTimer?.invalidate()
+        stateScheduler.cancel()
         stopWalk()
         usageSessionTracker.stop()
         removeUsageSessionObservers()
@@ -203,7 +206,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             self.stateEndDate = nil
             self.applyState(newState)
             if newState.isLongDuration {
-                self.showNextQueuedAgentPresentationIfPossible()
+                Task { @MainActor in
+                    self.showNextQueuedAgentPresentationIfPossible()
+                }
             }
         }
         stateMachine.onDurationScheduled = { [weak self] state, duration in
@@ -264,7 +269,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
 
     private func configureMenus() {
         catMenuController.onPet = { [weak self] in self?.petCat() }
-        catMenuController.onOuting = { [weak self] in self?.stateMachine.beginOutingPrompt() }
+        catMenuController.onOuting = { [weak self] in self?.beginOutingPromptIfAvailable() }
         catMenuController.onSettings = { [weak self] in self?.showSettings() }
         catMenuController.onSleep = { NSApplication.shared.terminate(nil) }
 
@@ -272,7 +277,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         dockMenuController.statusProvider = { [weak self] in self?.statusSnapshot() }
         dockMenuController.settingsProvider = { [weak self] in self?.settings ?? .defaults }
         dockMenuController.onPet = { [weak self] in self?.petCat() }
-        dockMenuController.onOuting = { [weak self] in self?.stateMachine.beginOutingPrompt() }
+        dockMenuController.onOuting = { [weak self] in self?.beginOutingPromptIfAvailable() }
         dockMenuController.onRecall = { [weak self] in self?.showRecallConfirmation() }
         dockMenuController.onSettings = { [weak self] in self?.showSettings() }
         dockMenuController.onSleep = { NSApplication.shared.terminate(nil) }
@@ -984,6 +989,10 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         return activeAgentPresentation?.priority == .low && presentation.priority == .high
     }
 
+    private func isActiveAgentPresentation(_ presentation: AgentPresentation) -> Bool {
+        activeAgentPresentation == presentation
+    }
+
     private var isProtectedAgentInteraction: Bool {
         if stateMachine.state.isOuting { return true }
         if case .dialogue = stateMachine.state, activeAgentPresentation == nil { return true }
@@ -994,6 +1003,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         activeAgentPresentation = presentation
         agentPresentationTimer?.invalidate()
         agentPatrolTimer?.invalidate()
+        agentResumeTimer?.invalidate()
         stateScheduler.cancel()
         stateEndDate = nil
         stopWalk()
@@ -1024,12 +1034,14 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         walkAnimator.start(animation: animation) { [weak self, animation] frameIndex in
             Task { @MainActor in
                 guard let self else { return }
+                guard self.isActiveAgentPresentation(presentation) else { return }
                 self.catWindow.setImage(animation.frames[frameIndex], mirrored: self.walkDirection < 0, sourceSize: sourceSize)
             }
         }
         agentPatrolTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                guard self.isActiveAgentPresentation(presentation) else { return }
                 self.stopWalk()
                 self.showAgentDialogue(presentation, duration: 3.0)
             }
@@ -1050,7 +1062,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             message: presentation.message,
             primaryTitle: strings.ok,
             onPrimary: { [weak self] in
-                self?.finishAgentPresentation(
+                guard let self else { return }
+                guard self.isActiveAgentPresentation(presentation) else { return }
+                self.finishAgentPresentation(
                     resumeWhenIdle: true,
                     showRestingPose: showRestingPose
                 )
@@ -1059,7 +1073,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         if let duration {
             agentPresentationTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
                 Task { @MainActor in
-                    self?.finishAgentPresentation(
+                    guard let self else { return }
+                    guard self.isActiveAgentPresentation(presentation) else { return }
+                    self.finishAgentPresentation(
                         resumeWhenIdle: true,
                         showRestingPose: showRestingPose
                     )
@@ -1081,6 +1097,8 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         agentPresentationTimer = nil
         agentPatrolTimer?.invalidate()
         agentPatrolTimer = nil
+        agentResumeTimer?.invalidate()
+        agentResumeTimer = nil
         stopWalk()
         catWindow.hideBubble()
         activeAgentPresentation = nil
@@ -1092,8 +1110,28 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             return
         }
 
-        if resumeWhenIdle, stateMachine.state.isLongDuration {
+        if resumeWhenIdle, showRestingPose {
+            scheduleAgentResumeAfterSuccess()
+        } else if resumeWhenIdle, stateMachine.state.isLongDuration {
             stateMachine.enterRandomLongDurationState()
+        }
+    }
+
+    private func scheduleAgentResumeAfterSuccess() {
+        guard stateMachine.state.isLongDuration, !isProtectedAgentInteraction else {
+            return
+        }
+        agentResumeTimer = Timer.scheduledTimer(withTimeInterval: 1.5, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.agentResumeTimer = nil
+                guard self.activeAgentPresentation == nil,
+                      self.stateMachine.state.isLongDuration,
+                      !self.isProtectedAgentInteraction else {
+                    return
+                }
+                self.stateMachine.enterRandomLongDurationState()
+            }
         }
     }
 
@@ -1120,6 +1158,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         reminderTimer = Timer.scheduledTimer(withTimeInterval: 10, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 guard let self else { return }
+                guard self.activeAgentPresentation == nil else { return }
                 if let reminder = self.reminderScheduler.dueReminder(whenCatInLongDurationState: self.stateMachine.state.isLongDuration) {
                     _ = self.stateMachine.requestReminder(reminder)
                 }
@@ -1467,7 +1506,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     }
 
     @objc private func startOutingFromMenu() {
-        stateMachine.beginOutingPrompt()
+        beginOutingPromptIfAvailable()
     }
 
     @objc private func petFromMenu() {
@@ -1480,6 +1519,11 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
 
     @objc private func quitFromMenu() {
         NSApplication.shared.terminate(nil)
+    }
+
+    private func beginOutingPromptIfAvailable() {
+        guard activeAgentPresentation == nil else { return }
+        stateMachine.beginOutingPrompt()
     }
 }
 
