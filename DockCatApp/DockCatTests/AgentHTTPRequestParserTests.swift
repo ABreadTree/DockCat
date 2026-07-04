@@ -10,7 +10,7 @@ final class AgentHTTPRequestParserTests: XCTestCase {
     }
 
     func testServerAcceptsLoopbackAgentEvent() throws {
-        let port: UInt16 = 18765
+        let port = try freeLoopbackPort()
         let eventStore = CapturedAgentEvent()
         let server = AgentHTTPServer(port: port) { event in
             eventStore.set(event)
@@ -37,6 +37,53 @@ final class AgentHTTPRequestParserTests: XCTestCase {
         XCTAssertEqual(event?.agent, "codex")
         XCTAssertEqual(event?.session, "manual")
         XCTAssertEqual(event?.status, .info)
+    }
+
+    func testServerCanRestartImmediatelyOnSamePort() throws {
+        let port = try freeLoopbackPort()
+        let eventStore = CapturedAgentEvent()
+        let server = AgentHTTPServer(port: port) { event in
+            eventStore.set(event)
+        }
+
+        server.start()
+        XCTAssertTrue(waitUntil(timeout: 2.0) { server.isRunning })
+        server.stop()
+        XCTAssertTrue(waitUntil(timeout: 2.0) { !server.isRunning })
+
+        server.start()
+        defer { server.stop() }
+        XCTAssertTrue(waitUntil(timeout: 2.0) { server.isRunning })
+
+        let body = #"{"agent":"codex","session":"restart","status":"info"}"#
+        let request = makeRequest(headers: ["Content-Length: \(body.utf8.count)"], body: body)
+        let response = try sendLoopbackRequest(port: port, request: request, timeout: 1.0)
+
+        XCTAssertTrue(String(decoding: response, as: UTF8.self).hasPrefix("HTTP/1.1 204 No Content\r\n"))
+        XCTAssertTrue(waitUntil(timeout: 1.0) { eventStore.value?.session == "restart" })
+    }
+
+    func testSlowClientDoesNotBlockLaterAgentEvent() throws {
+        let port = try freeLoopbackPort()
+        let eventStore = CapturedAgentEvent()
+        let server = AgentHTTPServer(port: port) { event in
+            eventStore.set(event)
+        }
+
+        server.start()
+        defer { server.stop() }
+        XCTAssertTrue(waitUntil(timeout: 2.0) { server.isRunning })
+
+        let slowClient = try openLoopbackSocket(port: port, timeout: 1.0)
+        defer { close(slowClient) }
+        Thread.sleep(forTimeInterval: 0.05)
+
+        let body = #"{"agent":"codex","session":"fast","status":"info"}"#
+        let request = makeRequest(headers: ["Content-Length: \(body.utf8.count)"], body: body)
+        let response = try sendLoopbackRequest(port: port, request: request, timeout: 1.0)
+
+        XCTAssertTrue(String(decoding: response, as: UTF8.self).hasPrefix("HTTP/1.1 204 No Content\r\n"))
+        XCTAssertTrue(waitUntil(timeout: 1.0) { eventStore.value?.session == "fast" })
     }
 
     func testRequestBufferWaitsForSplitBodyBytes() {
@@ -172,10 +219,47 @@ final class AgentHTTPRequestParserTests: XCTestCase {
         return condition()
     }
 
-    private func sendLoopbackRequest(port: UInt16, request: Data) throws -> Data {
+    private func sendLoopbackRequest(port: UInt16, request: Data, timeout: TimeInterval = 2.0) throws -> Data {
+        let fileDescriptor = try openLoopbackSocket(port: port, timeout: timeout)
+        defer { close(fileDescriptor) }
+
+        try request.withUnsafeBytes { rawBuffer in
+            guard let baseAddress = rawBuffer.baseAddress else { return }
+            var bytesSent = 0
+            while bytesSent < rawBuffer.count {
+                let result = send(fileDescriptor, baseAddress.advanced(by: bytesSent), rawBuffer.count - bytesSent, 0)
+                if result > 0 {
+                    bytesSent += result
+                } else if errno == EINTR {
+                    continue
+                } else {
+                    throw posixTestError("send")
+                }
+            }
+        }
+
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 4096)
+        while true {
+            let count = recv(fileDescriptor, &buffer, buffer.count, 0)
+            if count > 0 {
+                response.append(buffer, count: count)
+            } else if count == 0 {
+                break
+            } else if errno == EINTR {
+                continue
+            } else {
+                throw posixTestError("recv")
+            }
+        }
+        return response
+    }
+
+    private func openLoopbackSocket(port: UInt16, timeout: TimeInterval) throws -> Int32 {
         let fileDescriptor = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
         XCTAssertGreaterThanOrEqual(fileDescriptor, 0)
-        defer { close(fileDescriptor) }
+        guard fileDescriptor >= 0 else { throw posixTestError("socket") }
+        setSocketTimeout(fileDescriptor, timeout: timeout)
 
         var address = sockaddr_in()
         address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
@@ -188,26 +272,60 @@ final class AgentHTTPRequestParserTests: XCTestCase {
                 connect(fileDescriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
-        XCTAssertEqual(connected, 0)
+        guard connected == 0 else {
+            close(fileDescriptor)
+            throw posixTestError("connect")
+        }
 
-        request.withUnsafeBytes { rawBuffer in
-            guard let baseAddress = rawBuffer.baseAddress else { return }
-            var bytesSent = 0
-            while bytesSent < rawBuffer.count {
-                let result = send(fileDescriptor, baseAddress.advanced(by: bytesSent), rawBuffer.count - bytesSent, 0)
-                XCTAssertGreaterThan(result, 0)
-                bytesSent += result
+        return fileDescriptor
+    }
+
+    private func freeLoopbackPort() throws -> UInt16 {
+        let fileDescriptor = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)
+        XCTAssertGreaterThanOrEqual(fileDescriptor, 0)
+        guard fileDescriptor >= 0 else { throw posixTestError("socket") }
+        defer { close(fileDescriptor) }
+
+        var address = sockaddr_in()
+        address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        address.sin_family = sa_family_t(AF_INET)
+        address.sin_port = 0
+        address.sin_addr = in_addr(s_addr: inet_addr("127.0.0.1"))
+
+        let bound = withUnsafePointer(to: &address) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                Darwin.bind(fileDescriptor, socketAddress, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
+        guard bound == 0 else { throw posixTestError("bind") }
 
-        var response = Data()
-        var buffer = [UInt8](repeating: 0, count: 4096)
-        while true {
-            let count = recv(fileDescriptor, &buffer, buffer.count, 0)
-            if count <= 0 { break }
-            response.append(buffer, count: count)
+        var selectedAddress = sockaddr_in()
+        var length = socklen_t(MemoryLayout<sockaddr_in>.size)
+        let named = withUnsafeMutablePointer(to: &selectedAddress) { pointer in
+            pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) { socketAddress in
+                getsockname(fileDescriptor, socketAddress, &length)
+            }
         }
-        return response
+        guard named == 0 else { throw posixTestError("getsockname") }
+        return UInt16(bigEndian: selectedAddress.sin_port)
+    }
+
+    private func setSocketTimeout(_ socket: Int32, timeout: TimeInterval) {
+        let seconds = Int(timeout)
+        let microseconds = Int((timeout - TimeInterval(seconds)) * 1_000_000)
+        var value = timeval(tv_sec: seconds, tv_usec: Int32(microseconds))
+        withUnsafePointer(to: &value) { pointer in
+            _ = setsockopt(socket, SOL_SOCKET, SO_RCVTIMEO, pointer, socklen_t(MemoryLayout<timeval>.size))
+            _ = setsockopt(socket, SOL_SOCKET, SO_SNDTIMEO, pointer, socklen_t(MemoryLayout<timeval>.size))
+        }
+    }
+
+    private func posixTestError(_ operation: String) -> NSError {
+        NSError(
+            domain: NSPOSIXErrorDomain,
+            code: Int(errno),
+            userInfo: [NSLocalizedDescriptionKey: "\(operation) failed: \(String(cString: strerror(errno)))"]
+        )
     }
 }
 

@@ -62,13 +62,27 @@ final class AgentHTTPServer {
 }
 
 private final class AgentHTTPServerState: @unchecked Sendable {
+    private struct ActiveConnection: Hashable {
+        let socket: Int32
+        let generation: UInt64
+    }
+
+    private static let maxActiveConnections = 8
+
     private let port: UInt16
     private let onEvent: @Sendable (AgentEvent) -> Void
     private let lock = NSLock()
+    private let connectionQueue = DispatchQueue(
+        label: "DockCat.AgentHTTPServer.Connections",
+        qos: .utility,
+        attributes: .concurrent
+    )
 
     private var listenerSocket: Int32 = -1
+    private var listenerGeneration: UInt64 = 0
+    private var connectionGeneration: UInt64 = 0
     private var running = false
-    private var activeConnections: Set<Int32> = []
+    private var activeConnections: Set<ActiveConnection> = []
 
     var isRunning: Bool {
         lock.lock()
@@ -91,32 +105,34 @@ private final class AgentHTTPServerState: @unchecked Sendable {
             lock.unlock()
             return
         }
+        listenerGeneration &+= 1
+        let generation = listenerGeneration
         listenerSocket = socket
         running = true
         lock.unlock()
 
         DispatchQueue.global(qos: .utility).async { [weak self] in
-            self?.acceptLoop(listenerSocket: socket)
+            self?.acceptLoop(listenerSocket: socket, generation: generation)
         }
     }
 
     func stop() {
         lock.lock()
         let socket = listenerSocket
-        let connections = Array(activeConnections)
+        let connections = activeConnections.map(\.socket)
+        listenerGeneration &+= 1
         listenerSocket = -1
-        activeConnections.removeAll()
         running = false
         lock.unlock()
 
         closeSocket(socket)
-        connections.forEach(closeSocket)
+        connections.forEach(shutdownSocket)
     }
 
-    private func acceptLoop(listenerSocket: Int32) {
-        defer { finishListenerIfCurrent(listenerSocket) }
+    private func acceptLoop(listenerSocket: Int32, generation: UInt64) {
+        defer { finishListenerIfCurrent(listenerSocket, generation: generation) }
 
-        while isRunning(listenerSocket: listenerSocket) {
+        while isRunning(listenerSocket: listenerSocket, generation: generation) {
             var address = sockaddr_storage()
             var addressLength = socklen_t(MemoryLayout<sockaddr_storage>.size)
             let connection = withUnsafeMutablePointer(to: &address) { pointer in
@@ -129,28 +145,34 @@ private final class AgentHTTPServerState: @unchecked Sendable {
                 if errno == EINTR {
                     continue
                 }
-                if isRunning(listenerSocket: listenerSocket) {
+                if isRunning(listenerSocket: listenerSocket, generation: generation) {
                     DockCatLog.app.error("\(self.posixErrorMessage("accept"))")
                 }
                 break
             }
 
-            guard addActiveConnection(connection) else {
+            configureConnectionSocket(connection)
+            guard let activeConnection = addActiveConnection(connection) else {
                 closeSocket(connection)
                 continue
             }
-            configureConnectionSocket(connection)
-            handleConnection(connection)
-            closeConnection(connection)
+            connectionQueue.async { [weak self] in
+                guard let self else {
+                    closeSocket(connection)
+                    return
+                }
+                self.handleConnection(activeConnection)
+                self.closeConnection(activeConnection)
+            }
         }
     }
 
-    private func handleConnection(_ connection: Int32) {
+    private func handleConnection(_ connection: ActiveConnection) {
         var requestBuffer = AgentHTTPRequestBuffer()
         var buffer = [UInt8](repeating: 0, count: 4096)
 
         while isActiveConnection(connection) {
-            let count = Darwin.recv(connection, &buffer, buffer.count, 0)
+            let count = Darwin.recv(connection.socket, &buffer, buffer.count, 0)
             if count > 0 {
                 let chunk = Data(buffer[0..<count])
                 switch requestBuffer.append(chunk) {
@@ -176,7 +198,7 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         }
     }
 
-    private func respond(to data: Data, on connection: Int32) {
+    private func respond(to data: Data, on connection: ActiveConnection) {
         let response: AgentHTTPResponse
         do {
             let request = try AgentHTTPRequestParser.parse(data)
@@ -189,12 +211,13 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         sendResponse(response, on: connection)
     }
 
-    private func sendResponse(_ response: AgentHTTPResponse, on connection: Int32) {
+    private func sendResponse(_ response: AgentHTTPResponse, on connection: ActiveConnection) {
+        guard isActiveConnection(connection) else { return }
         response.data.withUnsafeBytes { rawBuffer in
             guard let baseAddress = rawBuffer.baseAddress else { return }
             var bytesSent = 0
             while bytesSent < rawBuffer.count {
-                let result = Darwin.send(connection, baseAddress.advanced(by: bytesSent), rawBuffer.count - bytesSent, 0)
+                let result = Darwin.send(connection.socket, baseAddress.advanced(by: bytesSent), rawBuffer.count - bytesSent, 0)
                 if result > 0 {
                     bytesSent += result
                 } else if errno == EINTR {
@@ -257,39 +280,41 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         _ = setsockopt(socket, SOL_SOCKET, option, &value, socklen_t(MemoryLayout<Int32>.size))
     }
 
-    private func addActiveConnection(_ connection: Int32) -> Bool {
+    private func addActiveConnection(_ connection: Int32) -> ActiveConnection? {
         lock.lock()
         defer { lock.unlock() }
-        guard running else { return false }
-        activeConnections.insert(connection)
-        return true
+        guard running, activeConnections.count < Self.maxActiveConnections else { return nil }
+        connectionGeneration &+= 1
+        let activeConnection = ActiveConnection(socket: connection, generation: connectionGeneration)
+        activeConnections.insert(activeConnection)
+        return activeConnection
     }
 
-    private func closeConnection(_ connection: Int32) {
+    private func closeConnection(_ connection: ActiveConnection) {
         lock.lock()
         let shouldClose = activeConnections.remove(connection) != nil
         lock.unlock()
 
         if shouldClose {
-            closeSocket(connection)
+            closeSocket(connection.socket)
         }
     }
 
-    private func isActiveConnection(_ connection: Int32) -> Bool {
+    private func isActiveConnection(_ connection: ActiveConnection) -> Bool {
         lock.lock()
         defer { lock.unlock() }
         return activeConnections.contains(connection)
     }
 
-    private func isRunning(listenerSocket socket: Int32) -> Bool {
+    private func isRunning(listenerSocket socket: Int32, generation: UInt64) -> Bool {
         lock.lock()
         defer { lock.unlock() }
-        return running && listenerSocket == socket
+        return running && listenerSocket == socket && listenerGeneration == generation
     }
 
-    private func finishListenerIfCurrent(_ socket: Int32) {
+    private func finishListenerIfCurrent(_ socket: Int32, generation: UInt64) {
         lock.lock()
-        let shouldClose = listenerSocket == socket
+        let shouldClose = listenerSocket == socket && listenerGeneration == generation
         if shouldClose {
             listenerSocket = -1
             running = false
@@ -320,6 +345,11 @@ private final class AgentHTTPServerState: @unchecked Sendable {
 
 private func closeSocket(_ socket: Int32) {
     guard socket >= 0 else { return }
-    _ = Darwin.shutdown(socket, SHUT_RDWR)
+    shutdownSocket(socket)
     _ = Darwin.close(socket)
+}
+
+private func shutdownSocket(_ socket: Int32) {
+    guard socket >= 0 else { return }
+    _ = Darwin.shutdown(socket, SHUT_RDWR)
 }
