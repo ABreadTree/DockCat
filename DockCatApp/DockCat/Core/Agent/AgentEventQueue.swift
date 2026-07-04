@@ -32,6 +32,13 @@ struct AgentEventQueue {
         return pending.removeFirst()
     }
 
+    func peekNext() -> AgentPresentation? {
+        if let highPriority = pending.first(where: { $0.priority == .high }) {
+            return highPriority
+        }
+        return pending.first
+    }
+
     private mutating func trimToMaxCount() {
         while pending.count > maxCount {
             if let lowIndex = pending.firstIndex(where: { $0.priority == .low }) {

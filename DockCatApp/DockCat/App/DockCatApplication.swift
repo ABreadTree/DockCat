@@ -206,10 +206,8 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             self.stopWalk()
             self.stateEndDate = nil
             self.applyState(newState)
-            if newState.isLongDuration {
-                Task { @MainActor in
-                    self.showNextQueuedAgentPresentationIfPossible()
-                }
+            Task { @MainActor in
+                self.showNextQueuedAgentPresentationIfPossible()
             }
         }
         stateMachine.onDurationScheduled = { [weak self] state, duration in
@@ -986,8 +984,19 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
 
     private func canShowAgentPresentation(_ presentation: AgentPresentation) -> Bool {
         if isProtectedAgentInteraction { return false }
-        if activeAgentPresentation == nil { return stateMachine.state.isLongDuration }
+        if activeAgentPresentation == nil { return canStartAgentPresentation(presentation) }
         return activeAgentPresentation?.priority == .low && presentation.priority == .high
+    }
+
+    private func canStartAgentPresentation(_ presentation: AgentPresentation) -> Bool {
+        switch stateMachine.state {
+        case .walking, .resting:
+            return true
+        case .transitioning:
+            return presentation.priority == .high
+        default:
+            return false
+        }
     }
 
     private func isActiveAgentPresentation(token: Int) -> Bool {
@@ -1123,8 +1132,17 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
 
         if resumeWhenIdle, showRestingPose {
             scheduleAgentResumeAfterSuccess()
-        } else if resumeWhenIdle, stateMachine.state.isLongDuration {
+        } else if resumeWhenIdle, canResumeAfterAgentPresentation {
             stateMachine.enterRandomLongDurationState()
+        }
+    }
+
+    private var canResumeAfterAgentPresentation: Bool {
+        switch stateMachine.state {
+        case .walking, .resting, .transitioning:
+            return true
+        default:
+            return false
         }
     }
 
@@ -1152,12 +1170,11 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private func showNextQueuedAgentPresentationIfPossible() -> Bool {
         guard activeAgentPresentation == nil,
               !isProtectedAgentInteraction,
-              stateMachine.state.isLongDuration else {
+              let next = agentEventQueue.peekNext(),
+              canStartAgentPresentation(next) else {
             return false
         }
-        guard let next = agentEventQueue.popNext() else {
-            return false
-        }
+        _ = agentEventQueue.popNext()
         showAgentPresentation(next)
         return true
     }

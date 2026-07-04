@@ -31,6 +31,17 @@ final class AgentEventQueueTests: XCTestCase {
         XCTAssertEqual(queue.popNext()?.event.status, .failure)
     }
 
+    func testPeekNextMatchesPriorityWithoutRemoving() {
+        var queue = AgentEventQueue(maxCount: 5)
+
+        queue.enqueue(presentation(agent: "codex", session: "task", status: .working, message: "low"))
+        queue.enqueue(presentation(agent: "claude", session: "task", status: .failure, message: "high"))
+
+        XCTAssertEqual(queue.peekNext()?.event.status, .failure)
+        XCTAssertEqual(queue.pendingCount, 2)
+        XCTAssertEqual(queue.popNext()?.event.status, .failure)
+    }
+
     func testDropsOldestLowPriorityWhenFull() {
         var queue = AgentEventQueue(maxCount: 2)
 
