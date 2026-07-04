@@ -15,7 +15,8 @@ struct AgentEventQueue {
     mutating func enqueue(_ presentation: AgentPresentation) {
         if presentation.priority == .low,
            let index = pending.firstIndex(where: { $0.priority == .low && $0.coalescingKey == presentation.coalescingKey }) {
-            pending[index] = presentation
+            pending.remove(at: index)
+            pending.append(presentation)
             return
         }
 
