@@ -2,6 +2,12 @@ import XCTest
 @testable import DockCat
 
 final class AgentHTTPRequestParserTests: XCTestCase {
+    func testServerCanBeConstructedWithoutStarting() {
+        let server = AgentHTTPServer(port: 8765) { _ in }
+
+        XCTAssertFalse(server.isRunning)
+    }
+
     func testParsesValidPostEventRequest() throws {
         let body = #"{"agent":"codex","status":"info","message":"hello"}"#
         let request = makeRequest(
