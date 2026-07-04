@@ -40,8 +40,9 @@ final class AgentEventTests: XCTestCase {
 
     func testTrimsAndCapsMessageAndHint() throws {
         let longMessage = String(repeating: "x", count: 240)
+        let longHint = String(repeating: "y", count: 240)
         let data = """
-        {"agent":" codex ","session":" task ","status":"info","message":"  \(longMessage)  ","hint":"  done  "}
+        {"agent":" codex ","session":" task ","status":"info","message":"  \(longMessage)  ","hint":"  \(longHint)  "}
         """.data(using: .utf8)!
 
         let event = try AgentEvent.decode(from: data)
@@ -49,6 +50,7 @@ final class AgentEventTests: XCTestCase {
         XCTAssertEqual(event.agent, "codex")
         XCTAssertEqual(event.session, "task")
         XCTAssertEqual(event.message?.count, AgentEvent.maxTextLength)
-        XCTAssertEqual(event.hint, "done")
+        XCTAssertEqual(event.hint?.count, AgentEvent.maxTextLength)
+        XCTAssertEqual(event.hint, String(longHint.prefix(AgentEvent.maxTextLength)))
     }
 }
