@@ -94,6 +94,22 @@ struct AppStrings {
         }
     }
 
+    func agentEventFallback(agent: String, status: AgentStatus, message: String?) -> String {
+        let suffix = message.map { ": \($0)" } ?? ""
+        switch (language, status) {
+        case (.chinese, .working): return "\(agent) 正在处理\(suffix)"
+        case (.chinese, .success): return "\(agent) 完成了\(suffix)"
+        case (.chinese, .failure): return "\(agent) 需要注意\(suffix)"
+        case (.chinese, .waiting): return "\(agent) 正在等待\(suffix)"
+        case (.chinese, .info): return "\(agent)\(suffix)"
+        case (.english, .working): return "\(agent) is working\(suffix)"
+        case (.english, .success): return "\(agent) finished\(suffix)"
+        case (.english, .failure): return "\(agent) needs attention\(suffix)"
+        case (.english, .waiting): return "\(agent) is waiting\(suffix)"
+        case (.english, .info): return "\(agent)\(suffix)"
+        }
+    }
+
     var done: String {
         switch language {
         case .chinese: "完成啦"
