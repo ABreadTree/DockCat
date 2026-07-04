@@ -113,16 +113,20 @@ private final class AgentHTTPServerState: @unchecked Sendable {
             parameters.requiredLocalEndpoint = .hostPort(host: .ipv4(loopback), port: nwPort)
 
             let listener = try NWListener(using: parameters, on: nwPort)
-            listener.newConnectionHandler = { [weak self] connection in
-                self?.handle(connection)
+            listener.newConnectionHandler = { [weak self, weak listener] connection in
+                guard let listener else {
+                    connection.cancel()
+                    return
+                }
+                self?.handle(connection, for: listener)
             }
             listener.stateUpdateHandler = { [weak self] state in
                 guard let self else { return }
+                guard self.listener === listener else { return }
                 switch state {
                 case .ready:
                     self.running = true
                 case .cancelled, .failed:
-                    guard self.listener === listener else { return }
                     self.running = false
                     self.listener = nil
                 default:
@@ -147,8 +151,8 @@ private final class AgentHTTPServerState: @unchecked Sendable {
         requestBuffers.removeAll()
     }
 
-    private func handle(_ connection: NWConnection) {
-        guard running, listener != nil else {
+    private func handle(_ connection: NWConnection, for listener: NWListener) {
+        guard running, self.listener === listener else {
             connection.cancel()
             return
         }
