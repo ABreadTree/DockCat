@@ -72,6 +72,8 @@ struct SettingsView: View {
     @State private var draft: AppSettings
     @State private var availableAssetPackIDs: [String]
     @State private var previewImage: NSImage?
+    @State private var agentBridgeSnapshot: AgentBridgeSnapshot
+    @State private var agentBridgeMessage: String?
     private let usageStatistics: UsageStatistics
     private let outingCatalog: OutingCatalog
     private let collectableInventory: CollectableInventory
@@ -107,6 +109,10 @@ struct SettingsView: View {
     private let onLoadAssetPack: (String) -> AssetPackPreviewResult
     private let onRestoreData: () -> Void
     private let onRedeemGiftCode: (AppLanguage) -> Void
+    private let onRefreshAgentBridge: () -> AgentBridgeSnapshot
+    private let onEnableAllAgentBridges: (Int) -> AgentBridgeSnapshot
+    private let onSetAgentBridgeEnabled: (AgentBridgeAgentID, Bool, Int) -> AgentBridgeSnapshot
+    private let onTestAgentBridge: (AgentBridgeAgentID) -> AgentBridgeActionResult
     var onSave: (AppSettings) -> Void
 
     init(
@@ -116,16 +122,22 @@ struct SettingsView: View {
         collectableInventory: CollectableInventory,
         dialogueImage: NSImage?,
         availableAssetPackIDs: [String],
+        agentBridgeSnapshot: AgentBridgeSnapshot,
         onOpenAssetPacksFolder: @escaping () -> Void,
         onReloadAssetPackIDs: @escaping () -> [String],
         onLoadAssetPack: @escaping (String) -> AssetPackPreviewResult,
         onRestoreData: @escaping () -> Void,
         onRedeemGiftCode: @escaping (AppLanguage) -> Void,
+        onRefreshAgentBridge: @escaping () -> AgentBridgeSnapshot,
+        onEnableAllAgentBridges: @escaping (Int) -> AgentBridgeSnapshot,
+        onSetAgentBridgeEnabled: @escaping (AgentBridgeAgentID, Bool, Int) -> AgentBridgeSnapshot,
+        onTestAgentBridge: @escaping (AgentBridgeAgentID) -> AgentBridgeActionResult,
         onSave: @escaping (AppSettings) -> Void
     ) {
         _draft = State(initialValue: settings)
         _availableAssetPackIDs = State(initialValue: availableAssetPackIDs)
         _previewImage = State(initialValue: dialogueImage)
+        _agentBridgeSnapshot = State(initialValue: agentBridgeSnapshot)
         self.usageStatistics = usageStatistics
         self.outingCatalog = outingCatalog
         self.collectableInventory = collectableInventory
@@ -134,6 +146,10 @@ struct SettingsView: View {
         self.onLoadAssetPack = onLoadAssetPack
         self.onRestoreData = onRestoreData
         self.onRedeemGiftCode = onRedeemGiftCode
+        self.onRefreshAgentBridge = onRefreshAgentBridge
+        self.onEnableAllAgentBridges = onEnableAllAgentBridges
+        self.onSetAgentBridgeEnabled = onSetAgentBridgeEnabled
+        self.onTestAgentBridge = onTestAgentBridge
         self.onSave = onSave
     }
 
@@ -149,6 +165,9 @@ struct SettingsView: View {
 
                 parametersTab
                     .tabItem { Text(strings.settingsParametersTab) }
+
+                agentsTab
+                    .tabItem { Text(strings.settingsAgentsTab) }
 
                 collectablesTab
                     .tabItem { Text(strings.settingsCollectablesTab) }
@@ -170,7 +189,7 @@ struct SettingsView: View {
             }
             .padding(14)
         }
-        .frame(width: 520, height: 580)
+        .frame(width: 560, height: 600)
         .background(Color(nsColor: .windowBackgroundColor))
     }
 
@@ -351,6 +370,154 @@ struct SettingsView: View {
             .frame(width: panelWidth)
         }
         .frame(width: panelWidth, alignment: .leading)
+    }
+
+    private var agentsTab: some View {
+        VStack(alignment: .center, spacing: 12) {
+            settingsPanel(
+                title: {
+                    sectionTitle(strings.settingsAgentServerSection)
+                },
+                content: {
+                    agentHTTPEnabledRow
+                    agentHTTPPortRow
+                    agentServerStatusRow
+                    agentBridgeActionsRow
+                }
+            )
+
+            GroupBox {
+                VStack(alignment: .leading, spacing: 8) {
+                    ForEach(agentBridgeSnapshot.agents) { snapshot in
+                        agentBridgeRow(snapshot)
+                    }
+                    if agentBridgeSnapshot.agents.isEmpty {
+                        Text(strings.settingsAgentBridgeUnavailable)
+                            .foregroundStyle(.secondary)
+                            .frame(width: panelWidth - 32, alignment: .center)
+                    }
+                }
+                .frame(width: panelWidth - 32, alignment: .leading)
+                .padding(.vertical, 6)
+            } label: {
+                sectionTitle(strings.settingsAgentBridgeSection)
+            }
+            .frame(width: panelWidth)
+
+            if let agentBridgeMessage {
+                Text(agentBridgeMessage)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.8)
+                    .frame(width: panelWidth, alignment: .leading)
+            }
+
+            Spacer()
+        }
+        .padding(.top, 12)
+        .padding(.horizontal, 14)
+        .onAppear {
+            agentBridgeSnapshot = onRefreshAgentBridge()
+        }
+    }
+
+    private var agentHTTPEnabledRow: some View {
+        HStack(spacing: rowSpacing) {
+            Text(strings.settingsAgentHTTPEnabled)
+                .frame(width: labelWidth, alignment: .trailing)
+            Toggle("", isOn: $draft.agentHTTPEnabled)
+                .toggleStyle(.checkbox)
+                .labelsHidden()
+                .frame(width: controlWidth, alignment: .leading)
+        }
+        .frame(width: rowWidth, alignment: .leading)
+    }
+
+    private var agentHTTPPortRow: some View {
+        HStack(spacing: rowSpacing) {
+            Text(strings.settingsAgentHTTPPort)
+                .frame(width: labelWidth, alignment: .trailing)
+            HStack(spacing: 6) {
+                Text("\(draft.agentHTTPPort)")
+                    .font(.system(.body, design: .monospaced))
+                    .frame(width: 58, alignment: .trailing)
+                Stepper("", value: agentHTTPPortBinding, in: 1...65_535, step: 1)
+                    .labelsHidden()
+                    .frame(width: 22)
+            }
+            .frame(width: controlWidth, alignment: .leading)
+        }
+        .frame(width: rowWidth, alignment: .leading)
+    }
+
+    private var agentServerStatusRow: some View {
+        HStack(spacing: rowSpacing) {
+            Text(strings.settingsAgentServerStatus)
+                .frame(width: labelWidth, alignment: .trailing)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(agentBridgeSnapshot.serverRunning ? strings.settingsAgentServerRunning : strings.settingsAgentServerStopped)
+                    .font(.system(size: 13, weight: .medium))
+                Text(agentBridgeSnapshot.helperPath.isEmpty ? strings.settingsAgentHelperMissing : agentBridgeSnapshot.helperPath)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            .frame(width: controlWidth, alignment: .leading)
+        }
+        .frame(width: rowWidth, alignment: .leading)
+    }
+
+    private var agentBridgeActionsRow: some View {
+        HStack(spacing: rowSpacing) {
+            Spacer()
+                .frame(width: labelWidth)
+            HStack(spacing: 8) {
+                Button(strings.settingsAgentRefresh) {
+                    agentBridgeSnapshot = onRefreshAgentBridge()
+                    syncDraftAgentBridgeSettings(from: agentBridgeSnapshot)
+                }
+                Button(strings.settingsAgentEnableAllDetected) {
+                    agentBridgeSnapshot = onEnableAllAgentBridges(draft.agentHTTPPort)
+                    syncDraftAgentBridgeSettings(from: agentBridgeSnapshot)
+                    agentBridgeMessage = strings.settingsAgentEnableAllDone
+                }
+            }
+            .frame(width: controlWidth, alignment: .leading)
+        }
+        .frame(width: rowWidth, alignment: .leading)
+    }
+
+    private func agentBridgeRow(_ snapshot: AgentBridgeAgentSnapshot) -> some View {
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(snapshot.agent.displayName)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                Text(strings.agentBridgeStatus(snapshot.status))
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            .frame(width: 118, alignment: .leading)
+
+            Spacer(minLength: 0)
+
+            Button(snapshot.isEnabled ? strings.settingsAgentDisable : strings.settingsAgentEnable) {
+                setAgentBridge(snapshot.agent, enabled: !snapshot.isEnabled)
+            }
+            .disabled(!snapshot.isAvailable)
+            .frame(width: 72)
+
+            Button(strings.settingsAgentSendTest) {
+                let result = onTestAgentBridge(snapshot.agent)
+                agentBridgeMessage = result.message
+            }
+            .disabled(snapshot.status == .notInstalled || snapshot.status == .migrated)
+            .frame(width: 72)
+        }
+        .frame(width: panelWidth - 32, alignment: .leading)
     }
 
     private var aboutTab: some View {
@@ -779,8 +946,29 @@ struct SettingsView: View {
         )
     }
 
+    private var agentHTTPPortBinding: Binding<Double> {
+        Binding(
+            get: { Double(draft.agentHTTPPort) },
+            set: { draft.agentHTTPPort = AppSettings.normalizedAgentHTTPPort(Int($0.rounded())) }
+        )
+    }
+
     private func applyLanguageChange(to newLanguage: AppLanguage) {
         draft.applyLanguageChangePreservingCustomText(to: newLanguage)
+    }
+
+    private func setAgentBridge(_ agent: AgentBridgeAgentID, enabled: Bool) {
+        agentBridgeSnapshot = onSetAgentBridgeEnabled(agent, enabled, draft.agentHTTPPort)
+        if let updated = agentBridgeSnapshot.agents.first(where: { $0.agent == agent }) {
+            draft.agentBridge[keyPath: agent.settingsKeyPath].enabled = updated.isEnabled
+            agentBridgeMessage = "\(updated.agent.displayName): \(strings.agentBridgeStatus(updated.status))"
+        }
+    }
+
+    private func syncDraftAgentBridgeSettings(from snapshot: AgentBridgeSnapshot) {
+        for agentSnapshot in snapshot.agents {
+            draft.agentBridge[keyPath: agentSnapshot.agent.settingsKeyPath].enabled = agentSnapshot.isEnabled
+        }
     }
 
     private func minutesBinding(_ keyPath: WritableKeyPath<AppSettings, TimeInterval>) -> Binding<Double> {
@@ -805,6 +993,7 @@ struct SettingsView: View {
         normalized.walkBaseSpeed = max(1, normalized.walkBaseSpeed)
         normalized.catScalePercent = max(1, min(100, normalized.catScalePercent))
         normalized.startPositionPercent = max(0, min(100, normalized.startPositionPercent))
+        normalized.agentHTTPPort = AppSettings.normalizedAgentHTTPPort(normalized.agentHTTPPort)
         normalized.waterReminderMessageSuffix = normalizedReminderSuffix(normalized.waterReminderMessageSuffix, fallback: strings.defaultReminderMessageSuffix(for: .water))
         normalized.movementReminderMessageSuffix = normalizedReminderSuffix(normalized.movementReminderMessageSuffix, fallback: strings.defaultReminderMessageSuffix(for: .movement))
         normalized.customReminderMessageSuffix = normalizedReminderSuffix(normalized.customReminderMessageSuffix, fallback: strings.defaultReminderMessageSuffix(for: .custom))

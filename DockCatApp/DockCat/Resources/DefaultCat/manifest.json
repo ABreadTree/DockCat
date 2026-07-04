@@ -1,5 +1,5 @@
 {
-  "id": "default-lizz",
+  "id": "default-xiaohou",
   "name": "Xiaohou",
   "author": "Niqk",
   "canvas_width": 1024,
@@ -17,7 +17,16 @@
   "animations": {
     "walk": {
       "fps": 3,
-      "frames": []
+      "frames": [
+        "animations/walk-xiaohou/walk_01.png",
+        "animations/walk-xiaohou/walk_02.png",
+        "animations/walk-xiaohou/walk_03.png",
+        "animations/walk-xiaohou/walk_04.png"
+      ]
     }
+  },
+  "app_icons": {
+    "sleep": "app_icons/icon_sleep.png",
+    "empty": "app_icons/icon_empty.png"
   }
 }

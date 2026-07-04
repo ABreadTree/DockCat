@@ -72,15 +72,15 @@ final class PoseRenderer {
 
     func animationFrames(_ keyPath: KeyPath<AssetManifest.Animations, AssetManifest.Animation>) -> SpriteAnimation {
         let animation = pack.manifest.animations[keyPath: keyPath]
-        let frames = walkFramesFromDirectory()
+        let frames = animationFrames(animation, in: pack)
         if !frames.isEmpty {
             return SpriteAnimation(frames: frames, fps: animation.fps, loops: true)
         }
 
         if let fallbackPack {
-            let fallbackFrames = walkFramesFromDirectory(in: fallbackPack)
+            let fallbackAnimation = fallbackPack.manifest.animations[keyPath: keyPath]
+            let fallbackFrames = animationFrames(fallbackAnimation, in: fallbackPack)
             if !fallbackFrames.isEmpty {
-                let fallbackAnimation = fallbackPack.manifest.animations[keyPath: keyPath]
                 return SpriteAnimation(frames: fallbackFrames, fps: fallbackAnimation.fps, loops: true)
             }
         }
@@ -90,17 +90,23 @@ final class PoseRenderer {
     }
 
     func walkAnimationSourcePack() -> CatAssetPack? {
-        if !walkFramesFromDirectory(in: pack).isEmpty {
+        if !animationFrames(pack.manifest.animations.walk, in: pack).isEmpty {
             return pack
         }
-        if let fallbackPack, !walkFramesFromDirectory(in: fallbackPack).isEmpty {
+        if let fallbackPack, !animationFrames(fallbackPack.manifest.animations.walk, in: fallbackPack).isEmpty {
             return fallbackPack
         }
         return nil
     }
 
-    private func walkFramesFromDirectory() -> [NSImage] {
-        walkFramesFromDirectory(in: pack)
+    private func animationFrames(_ animation: AssetManifest.Animation, in pack: CatAssetPack) -> [NSImage] {
+        let manifestFrames = animation.frames
+            .map { pack.url(for: $0) }
+            .compactMap { loadRegularImage(at: $0) }
+        if !manifestFrames.isEmpty {
+            return manifestFrames
+        }
+        return walkFramesFromDirectory(in: pack)
     }
 
     private func walkFramesFromDirectory(in pack: CatAssetPack) -> [NSImage] {
@@ -118,6 +124,12 @@ final class PoseRenderer {
                 return values?.isRegularFile == true
             }
             .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
-            .compactMap { NSImage(contentsOf: $0) }
+            .compactMap { loadRegularImage(at: $0) }
+    }
+
+    private func loadRegularImage(at url: URL) -> NSImage? {
+        let values = try? url.resourceValues(forKeys: [.isRegularFileKey])
+        guard values?.isRegularFile == true else { return nil }
+        return NSImage(contentsOf: url)
     }
 }
