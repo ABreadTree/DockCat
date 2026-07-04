@@ -39,6 +39,11 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private var outingTimer: Timer?
     private var startupTimer: Timer?
     private var walkMovementTimer: Timer?
+    private var agentHTTPServer: AgentHTTPServer?
+    private var agentEventQueue = AgentEventQueue()
+    private var activeAgentPresentation: AgentPresentation?
+    private var agentPresentationTimer: Timer?
+    private var agentPatrolTimer: Timer?
     private var stateEndDate: Date?
     private var walkDirection: CGFloat = 1
     private var pendingOutingDuration: TimeInterval?
@@ -83,6 +88,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         configureMenus()
         configureApplicationMenu()
         configureDockObserver()
+        configureAgentHTTPServer()
         RuntimeDiagnostics.record("activitySpace frame=\(activitySpace.screenFrame) visible=\(activitySpace.visibleFrame) edge=\(activitySpace.dockEdge) entrance=\(activitySpace.entrancePoint)")
         iconController.showSleepIcon()
         catWindow.hide()
@@ -106,6 +112,9 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         startupTimer?.invalidate()
         reminderTimer?.invalidate()
         outingTimer?.invalidate()
+        agentHTTPServer?.stop()
+        agentPresentationTimer?.invalidate()
+        agentPatrolTimer?.invalidate()
         stopWalk()
         usageSessionTracker.stop()
         removeUsageSessionObservers()
@@ -764,12 +773,14 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
                 self.saveUserDataBackup()
                 self.catWindow.hideBubble()
                 self.stateMachine.finishReminder()
+                self.showNextQueuedAgentPresentationIfPossible()
             },
             onSecondary: { [weak self] in
                 guard let self else { return }
                 self.reminderScheduler.snooze(type)
                 self.catWindow.hideBubble()
                 self.stateMachine.finishReminder()
+                self.showNextQueuedAgentPresentationIfPossible()
             }
         )
     }
@@ -811,6 +822,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 self.catWindow.hideBubble()
                 self.stateMachine.enterRandomLongDurationState()
+                self.showNextQueuedAgentPresentationIfPossible()
             }
         )
     }
@@ -940,6 +952,160 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         stateMachine.welcomeBack()
         restartRemindersAfterOuting()
         saveUserDataBackup()
+        showNextQueuedAgentPresentationIfPossible()
+    }
+
+    private func configureAgentHTTPServer() {
+        let server = AgentHTTPServer { [weak self] event in
+            Task { @MainActor in
+                self?.receiveAgentEvent(event)
+            }
+        }
+        agentHTTPServer = server
+        server.start()
+    }
+
+    private func receiveAgentEvent(_ event: AgentEvent) {
+        let presentation = AgentEventPresenter.presentation(for: event, strings: strings)
+        if canShowAgentPresentation(presentation) {
+            showAgentPresentation(presentation)
+        } else {
+            agentEventQueue.enqueue(presentation)
+        }
+    }
+
+    private func canShowAgentPresentation(_ presentation: AgentPresentation) -> Bool {
+        if isProtectedAgentInteraction { return false }
+        if activeAgentPresentation == nil { return stateMachine.state.isLongDuration }
+        return activeAgentPresentation?.priority == .low && presentation.priority == .high
+    }
+
+    private var isProtectedAgentInteraction: Bool {
+        if stateMachine.state.isOuting { return true }
+        if case .dialogue = stateMachine.state, activeAgentPresentation == nil { return true }
+        return false
+    }
+
+    private func showAgentPresentation(_ presentation: AgentPresentation) {
+        activeAgentPresentation = presentation
+        agentPresentationTimer?.invalidate()
+        agentPatrolTimer?.invalidate()
+        stateScheduler.cancel()
+        stateEndDate = nil
+        stopWalk()
+        catWindow.hideBubble()
+
+        switch presentation.action {
+        case .smallPatrol:
+            showAgentSmallPatrol(presentation)
+        case .comfortableFinish:
+            showAgentDialogue(presentation, duration: 3.0)
+        case .seriousAlert:
+            showAgentDialogue(presentation, duration: 8.0)
+        case .waitForUser:
+            showAgentDialogue(presentation, duration: nil)
+        case .turnToNotice:
+            showAgentDialogue(presentation, duration: 3.0)
+        }
+    }
+
+    private func showAgentSmallPatrol(_ presentation: AgentPresentation) {
+        let animation = renderer.animationFrames(\.walk)
+        let sourceSize = stableWalkSourceSize()
+        walkDirection = Bool.random() ? 1 : -1
+        let point = clampedCatPoint(stateMachine.position)
+        stateMachine.updateLongDurationPosition(point)
+        catWindow.setImage(animation.frames.first ?? renderer.firstImage(for: .dialogue), mirrored: walkDirection < 0, sourceSize: sourceSize)
+        catWindow.show(at: point)
+        walkAnimator.start(animation: animation) { [weak self, animation] frameIndex in
+            Task { @MainActor in
+                guard let self else { return }
+                self.catWindow.setImage(animation.frames[frameIndex], mirrored: self.walkDirection < 0, sourceSize: sourceSize)
+            }
+        }
+        agentPatrolTimer = Timer.scheduledTimer(withTimeInterval: 2.5, repeats: false) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                self.stopWalk()
+                self.showAgentDialogue(presentation, duration: 3.0)
+            }
+        }
+    }
+
+    private func showAgentDialogue(
+        _ presentation: AgentPresentation,
+        duration: TimeInterval?
+    ) {
+        let resumeWhenIdle = presentation.action != .comfortableFinish
+        let showRestingPose = presentation.action == .comfortableFinish
+        let pose = renderer.randomPose(for: .dialogue)
+        let point = clampedCatPoint(stateMachine.position)
+        stateMachine.updateLongDurationPosition(point)
+        catWindow.setImage(pose.image, mirrored: pose.mirrored)
+        catWindow.show(at: point)
+        catWindow.showBubble(
+            message: presentation.message,
+            primaryTitle: strings.ok,
+            onPrimary: { [weak self] in
+                self?.finishAgentPresentation(
+                    resumeWhenIdle: resumeWhenIdle,
+                    showRestingPose: showRestingPose
+                )
+            }
+        )
+        if let duration {
+            agentPresentationTimer = Timer.scheduledTimer(withTimeInterval: duration, repeats: false) { [weak self] _ in
+                Task { @MainActor in
+                    self?.finishAgentPresentation(
+                        resumeWhenIdle: resumeWhenIdle,
+                        showRestingPose: showRestingPose
+                    )
+                }
+            }
+        }
+    }
+
+    private func showAgentRestingPose() {
+        let pose = renderer.randomPose(for: .resting, fallback: .dialogue)
+        let point = clampedCatPoint(stateMachine.position)
+        stateMachine.updateLongDurationPosition(point)
+        catWindow.setImage(pose.image, mirrored: pose.mirrored)
+        catWindow.show(at: point)
+    }
+
+    private func finishAgentPresentation(resumeWhenIdle: Bool = true, showRestingPose: Bool = false) {
+        agentPresentationTimer?.invalidate()
+        agentPresentationTimer = nil
+        agentPatrolTimer?.invalidate()
+        agentPatrolTimer = nil
+        stopWalk()
+        catWindow.hideBubble()
+        activeAgentPresentation = nil
+        if showRestingPose {
+            showAgentRestingPose()
+        }
+
+        if showNextQueuedAgentPresentationIfPossible() {
+            return
+        }
+
+        if resumeWhenIdle, stateMachine.state.isLongDuration {
+            stateMachine.enterRandomLongDurationState()
+        }
+    }
+
+    @discardableResult
+    private func showNextQueuedAgentPresentationIfPossible() -> Bool {
+        guard activeAgentPresentation == nil,
+              !isProtectedAgentInteraction,
+              stateMachine.state.isLongDuration else {
+            return false
+        }
+        guard let next = agentEventQueue.popNext() else {
+            return false
+        }
+        showAgentPresentation(next)
+        return true
     }
 
     private func collectableImage(_ collectable: OutingCollectable) -> NSImage? {
