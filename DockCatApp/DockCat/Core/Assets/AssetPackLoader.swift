@@ -32,6 +32,7 @@ struct AssetPackValidationReport {
 final class AssetPackLoader {
     private static let defaultPackID = "default-xiaohou"
     private static let legacyDefaultPackID = "default-lizz"
+    private static let defaultXiaohouWalkFPS = 6.0
 
     private let fileManager: FileManager
     private let bundle: Bundle
@@ -75,7 +76,7 @@ final class AssetPackLoader {
                 transition: "poses/transition-xiaohou"
             ),
             animations: .init(
-                walk: .init(fps: 3, frames: Self.defaultXiaohouWalkFramePaths())
+                walk: .init(fps: Self.defaultXiaohouWalkFPS, frames: Self.defaultXiaohouWalkFramePaths())
             ),
             appIcons: .init(sleep: "app_icons/icon_sleep.png", empty: "app_icons/icon_empty.png")
         )
@@ -395,7 +396,7 @@ final class AssetPackLoader {
                 dialogue: "poses/dialogue-xiaohou",
                 transition: "poses/transition-xiaohou"
             )
-            && manifest.animations == .init(walk: .init(fps: 3, frames: Self.defaultXiaohouWalkFramePaths()))
+            && manifest.animations == .init(walk: .init(fps: Self.defaultXiaohouWalkFPS, frames: Self.defaultXiaohouWalkFramePaths()))
     }
 
     private func defaultXiaohouManifestData(withAppIcons: Bool) throws -> Data {
@@ -425,7 +426,7 @@ final class AssetPackLoader {
           },
           "animations": {
             "walk": {
-              "fps": 3,
+              "fps": 6,
               "frames": [
                 "animations/walk-xiaohou/walk_01.png",
                 "animations/walk-xiaohou/walk_02.png",

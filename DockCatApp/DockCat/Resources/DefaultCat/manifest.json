@@ -16,7 +16,7 @@
   },
   "animations": {
     "walk": {
-      "fps": 3,
+      "fps": 6,
       "frames": [
         "animations/walk-xiaohou/walk_01.png",
         "animations/walk-xiaohou/walk_02.png",

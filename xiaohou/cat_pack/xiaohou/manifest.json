@@ -16,8 +16,13 @@
   },
   "animations": {
     "walk": {
-      "fps": 3,
-      "frames": []
+      "fps": 6,
+      "frames": [
+        "animations/walk/walk_01.png",
+        "animations/walk/walk_02.png",
+        "animations/walk/walk_03.png",
+        "animations/walk/walk_04.png"
+      ]
     }
   },
   "app_icons": {

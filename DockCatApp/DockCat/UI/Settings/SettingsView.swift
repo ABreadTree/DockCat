@@ -206,8 +206,8 @@ struct SettingsView: View {
             HStack {
                 Spacer()
                 VStack(alignment: .leading, spacing: 12) {
-                    compactTextField(strings.settingsCatName, text: $draft.catName)
-                    compactTextField(strings.settingsSalutation, text: $draft.userSalutation)
+                    compactTextField(strings.settingsCatName, text: settingBinding(\.catName))
+                    compactTextField(strings.settingsSalutation, text: settingBinding(\.userSalutation))
                     assetPackRow
                     assetPackActionsRow
                     compactStepper(strings.settingsScale, value: scaleBinding, range: 1...100, step: 1, suffix: "%")
@@ -243,7 +243,7 @@ struct SettingsView: View {
         HStack(spacing: rowSpacing) {
             Text(strings.settingsAssetPackID)
                 .frame(width: labelWidth, alignment: .trailing)
-            AssetPackComboBox(text: $draft.selectedAssetPackID, items: availableAssetPackIDs)
+            AssetPackComboBox(text: settingBinding(\.selectedAssetPackID), items: availableAssetPackIDs)
                 .frame(width: assetInputWidth, height: 22)
         }
         .frame(width: rowWidth, alignment: .leading)
@@ -268,7 +268,7 @@ struct SettingsView: View {
         HStack(spacing: rowSpacing) {
             Text(strings.settingsCatActivityScope)
                 .frame(width: labelWidth, alignment: .trailing)
-            Picker("", selection: $draft.catActivityScope) {
+            Picker("", selection: settingBinding(\.catActivityScope)) {
                 Text(strings.settingsCatActivityScopeDockEdge).tag(CatActivityScope.dockEdge)
                 Text(strings.settingsCatActivityScopeDesktop).tag(CatActivityScope.desktop)
             }
@@ -305,7 +305,7 @@ struct SettingsView: View {
                     HStack(spacing: 18) {
                         sectionTitle(strings.settingsReminderSection)
                         HStack(spacing: 4) {
-                            Toggle("", isOn: $draft.remindersEnabled)
+                            Toggle("", isOn: settingBinding(\.remindersEnabled))
                                 .toggleStyle(.checkbox)
                                 .labelsHidden()
                             Text(strings.settingsReminderEnabled)
@@ -316,13 +316,13 @@ struct SettingsView: View {
                 },
                 content: {
                     compactStepper(strings.settingsWaterReminder, value: minutesBinding(\.waterReminderInterval), range: 1...240, step: 5, suffix: strings.minuteUnit)
-                    compactTextField(strings.settingsReminderMessage, text: $draft.waterReminderMessageSuffix)
+                    compactTextField(strings.settingsReminderMessage, text: settingBinding(\.waterReminderMessageSuffix))
                     compactStepper(strings.settingsMovementReminder, value: minutesBinding(\.movementReminderInterval), range: 5...360, step: 5, suffix: strings.minuteUnit)
-                    compactTextField(strings.settingsReminderMessage, text: $draft.movementReminderMessageSuffix)
+                    compactTextField(strings.settingsReminderMessage, text: settingBinding(\.movementReminderMessageSuffix))
                     customReminderToggleRow
                     if draft.customReminderEnabled {
                         compactStepper(strings.settingsCustomReminder, value: minutesBinding(\.customReminderInterval), range: 1...360, step: 5, suffix: strings.minuteUnit)
-                        compactTextField(strings.settingsReminderMessage, text: $draft.customReminderMessageSuffix)
+                        compactTextField(strings.settingsReminderMessage, text: settingBinding(\.customReminderMessageSuffix))
                     }
                 }
             )
@@ -336,7 +336,7 @@ struct SettingsView: View {
                     rangeRow(strings.settingsWalkDuration, minimum: minutesBinding(\.walkDurationMinimum), maximum: minutesBinding(\.walkDurationMaximum), range: 1...480)
                     compactStepper(strings.settingsWalkSpeed, value: speedBinding, range: 8...240, step: 4, suffix: "px/s")
                     compactStepper(strings.settingsDefaultOutingDuration, value: minutesBinding(\.defaultOutingDuration), range: 5...480, step: 5, suffix: strings.minuteUnit)
-                    compactTextField(strings.settingsOutingDepartureMessage, text: $draft.outingDepartureMessageSuffix)
+                    compactTextField(strings.settingsOutingDepartureMessage, text: settingBinding(\.outingDepartureMessageSuffix))
                 }
             )
 
@@ -426,7 +426,7 @@ struct SettingsView: View {
         HStack(spacing: rowSpacing) {
             Text(strings.settingsAgentHTTPEnabled)
                 .frame(width: labelWidth, alignment: .trailing)
-            Toggle("", isOn: $draft.agentHTTPEnabled)
+            Toggle("", isOn: settingBinding(\.agentHTTPEnabled))
                 .toggleStyle(.checkbox)
                 .labelsHidden()
                 .frame(width: controlWidth, alignment: .leading)
@@ -673,7 +673,7 @@ struct SettingsView: View {
         HStack(spacing: rowSpacing) {
             Text(strings.settingsDisplayRow)
                 .frame(width: labelWidth, alignment: .trailing)
-            Picker("", selection: $draft.activityDisplayID) {
+            Picker("", selection: settingBinding(\.activityDisplayID)) {
                 ForEach(DockGeometry.currentDisplaySelectionOptions(language: draft.language)) { option in
                     Text(option.title)
                         .tag(option.displayID)
@@ -776,7 +776,7 @@ struct SettingsView: View {
             Spacer()
                 .frame(width: labelWidth)
             HStack(spacing: 4) {
-                Toggle("", isOn: $draft.customReminderEnabled)
+                Toggle("", isOn: settingBinding(\.customReminderEnabled))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
                 Text(strings.settingsCustomReminder)
@@ -975,6 +975,13 @@ struct SettingsView: View {
         Binding(
             get: { draft[keyPath: keyPath] / 60 },
             set: { draft[keyPath: keyPath] = $0 * 60 }
+        )
+    }
+
+    private func settingBinding<Value>(_ keyPath: WritableKeyPath<AppSettings, Value>) -> Binding<Value> {
+        Binding(
+            get: { draft[keyPath: keyPath] },
+            set: { draft[keyPath: keyPath] = $0 }
         )
     }
 

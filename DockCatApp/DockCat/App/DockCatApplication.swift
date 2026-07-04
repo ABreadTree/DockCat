@@ -18,6 +18,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private let dockMenuController = DockMenuController()
     private let catMenuController = CatMenuController()
     private let walkAnimator = SpriteAnimator()
+    private let walkMotionModel = WalkMotionModel()
 
     private var settings: AppSettings = .defaults
     private var activitySpace = DockGeometry.currentActivitySpace(
@@ -49,6 +50,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
     private var agentResumeTimer: Timer?
     private var stateEndDate: Date?
     private var walkDirection: CGFloat = 1
+    private var walkMotionState: WalkMotionState?
     private var pendingOutingDuration: TimeInterval?
     private var pendingOutingReturnReward: OutingReward?
     private var shouldUseStartPositionForNextTransition = false
@@ -1370,6 +1372,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         catWindow.setImage(animation.frames.first ?? renderer.firstImage(for: .dialogue), mirrored: walkDirection < 0, sourceSize: sourceSize)
         let start = clampedCatPoint(stateMachine.position)
         stateMachine.updateLongDurationPosition(start)
+        walkMotionState = WalkMotionState(x: start.x, direction: walkDirection, pauseRemaining: 0, phase: 0)
         catWindow.show(at: start)
         walkAnimator.start(animation: animation) { [weak self, animation] frameIndex in
             Task { @MainActor in
@@ -1388,17 +1391,23 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         guard case .walking = stateMachine.state else { return }
         let speed = CGFloat(settings.walkBaseSpeed)
         let walkRange = activitySpace.walkRangeForContent(width: catWindow.catFrameSize.width, scope: settings.catActivityScope)
-        var nextX = stateMachine.position.x + walkDirection * speed / 30.0
-        if nextX <= walkRange.lowerBound {
-            nextX = walkRange.lowerBound
-            walkDirection = 1
-        } else if nextX >= walkRange.upperBound {
-            nextX = walkRange.upperBound
-            walkDirection = -1
-        }
-        let point = clampedCatPoint(CGPoint(x: nextX, y: stateMachine.position.y))
-        stateMachine.updateLongDurationPosition(point)
-        catWindow.setAnchor(point)
+        let currentMotionState = walkMotionState ?? WalkMotionState(
+            x: stateMachine.position.x,
+            direction: walkDirection,
+            pauseRemaining: 0,
+            phase: 0
+        )
+        let step = walkMotionModel.advance(
+            state: currentMotionState,
+            baseSpeed: speed,
+            range: walkRange,
+            deltaTime: 1.0 / 30.0
+        )
+        walkMotionState = step.state
+        walkDirection = step.state.direction
+        let logicalPoint = clampedCatPoint(CGPoint(x: step.state.x, y: stateMachine.position.y))
+        stateMachine.updateLongDurationPosition(logicalPoint)
+        catWindow.setAnchor(visualWalkPoint(for: logicalPoint, yOffset: step.visualYOffset))
         catWindow.setMirrored(walkDirection < 0)
     }
 
@@ -1491,6 +1500,7 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
         walkAnimator.stop()
         walkMovementTimer?.invalidate()
         walkMovementTimer = nil
+        walkMotionState = nil
     }
 
     private var outingWalkSpeed: CGFloat {
@@ -1568,10 +1578,24 @@ final class DockCatApplication: NSObject, NSApplicationDelegate {
             catWindow.show(at: point)
         case .walking:
             walkDirection *= -1
+            if var state = walkMotionState {
+                state.direction = walkDirection
+                state.pauseRemaining = max(state.pauseRemaining, 0.22)
+                walkMotionState = state
+            }
             catWindow.setMirrored(walkDirection < 0)
         default:
             return
         }
+    }
+
+    private func visualWalkPoint(for logicalPoint: CGPoint, yOffset: CGFloat) -> CGPoint {
+        var point = logicalPoint
+        point.y += yOffset
+        if settings.catActivityScope == .desktop {
+            return activitySpace.desktopClampedPoint(point, contentSize: catWindow.catFrameSize)
+        }
+        return point
     }
 
     private func clampedCatPoint(_ point: CGPoint) -> CGPoint {
