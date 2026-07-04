@@ -8,6 +8,25 @@ final class AgentHTTPRequestParserTests: XCTestCase {
         XCTAssertFalse(server.isRunning)
     }
 
+    func testRequestBufferWaitsForSplitBodyBytes() {
+        let body = #"{"agent":"codex","status":"info"}"#
+        let header = "POST /agent-events HTTP/1.1\r\nContent-Length: \(body.utf8.count)\r\n\r\n"
+        var buffer = AgentHTTPRequestBuffer()
+
+        XCTAssertEqual(buffer.append(Data((header + "{").utf8)), .needsMoreData)
+
+        let result = buffer.append(Data(body.dropFirst().utf8))
+
+        XCTAssertEqual(result, .ready(Data((header + body).utf8)))
+    }
+
+    func testRequestBufferRejectsMalformedContentLength() {
+        let request = Data("POST /agent-events HTTP/1.1\r\nContent-Length: nope\r\n\r\n{}".utf8)
+        var buffer = AgentHTTPRequestBuffer()
+
+        XCTAssertEqual(buffer.append(request), .badRequest)
+    }
+
     func testParsesValidPostEventRequest() throws {
         let body = #"{"agent":"codex","status":"info","message":"hello"}"#
         let request = makeRequest(
