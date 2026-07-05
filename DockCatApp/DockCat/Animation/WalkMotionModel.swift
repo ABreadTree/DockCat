@@ -16,7 +16,6 @@ struct WalkMotionStep: Equatable {
 
 struct WalkMotionModel {
     var boundaryPause: TimeInterval = 0.28
-    var bobAmplitude: CGFloat = 1.2
 
     func advance(
         state: WalkMotionState,
@@ -52,8 +51,7 @@ struct WalkMotionModel {
             return WalkMotionStep(state: next, visualYOffset: 0, isPaused: true)
         }
 
-        let yOffset = bobAmplitude * CGFloat(sin(phase))
-        return WalkMotionStep(state: next, visualYOffset: yOffset, isPaused: false)
+        return WalkMotionStep(state: next, visualYOffset: 0, isPaused: false)
     }
 
     private func normalized(_ state: WalkMotionState) -> WalkMotionState {

@@ -11,7 +11,7 @@ final class WalkBehaviorTests: XCTestCase {
     }
 
     func testWalkMotionTurnsWithShortPauseAtBoundary() {
-        let model = WalkMotionModel(boundaryPause: 0.35, bobAmplitude: 1.2)
+        let model = WalkMotionModel(boundaryPause: 0.35)
         let state = WalkMotionState(x: 98, direction: 1, pauseRemaining: 0, phase: 0)
 
         let step = model.advance(state: state, baseSpeed: 60, range: 0 ... 100, deltaTime: 1)
@@ -23,7 +23,7 @@ final class WalkBehaviorTests: XCTestCase {
     }
 
     func testWalkMotionCountsDownPauseBeforeMoving() {
-        let model = WalkMotionModel(boundaryPause: 0.35, bobAmplitude: 1.2)
+        let model = WalkMotionModel(boundaryPause: 0.35)
         let state = WalkMotionState(x: 50, direction: -1, pauseRemaining: 0.2, phase: 0)
 
         let step = model.advance(state: state, baseSpeed: 60, range: 0 ... 100, deltaTime: 0.1)
@@ -35,15 +35,25 @@ final class WalkBehaviorTests: XCTestCase {
         XCTAssertTrue(step.isPaused)
     }
 
-    func testWalkMotionVariesSpeedAndKeepsBobSubtle() {
-        let model = WalkMotionModel(boundaryPause: 0.35, bobAmplitude: 1.2)
+    func testWalkMotionVariesSpeedWithoutVerticalOffset() {
+        let model = WalkMotionModel(boundaryPause: 0.35)
         let state = WalkMotionState(x: 50, direction: 1, pauseRemaining: 0, phase: Double.pi / 2)
 
         let step = model.advance(state: state, baseSpeed: 60, range: 0 ... 100, deltaTime: 1.0 / 30.0)
 
         XCTAssertGreaterThan(step.state.x, 50)
         XCTAssertLessThanOrEqual(step.state.x, 50 + 60 / 30 * 1.13)
-        XCTAssertLessThanOrEqual(abs(step.visualYOffset), 1.2)
+        XCTAssertEqual(step.visualYOffset, 0, accuracy: 0.0001)
+        XCTAssertFalse(step.isPaused)
+    }
+
+    func testWalkMotionDoesNotAddRuntimeVerticalJitter() {
+        let model = WalkMotionModel(boundaryPause: 0.35)
+        let state = WalkMotionState(x: 50, direction: 1, pauseRemaining: 0, phase: Double.pi / 2)
+
+        let step = model.advance(state: state, baseSpeed: 60, range: 0 ... 100, deltaTime: 1.0 / 30.0)
+
+        XCTAssertEqual(step.visualYOffset, 0, accuracy: 0.0001)
         XCTAssertFalse(step.isPaused)
     }
 }
