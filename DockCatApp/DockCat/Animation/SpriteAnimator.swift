@@ -8,7 +8,7 @@ final class SpriteAnimator {
         stop()
         sequenceIndex = 0
         guard !animation.frames.isEmpty else { return }
-        let frameIndices = AnimationFrameSequence.pingPongIndices(frameCount: animation.frames.count)
+        let frameIndices = AnimationFrameSequence.playbackIndices(frameCount: animation.frames.count)
         onFrame(frameIndices[0])
         timer = Timer.scheduledTimer(withTimeInterval: animation.frameDuration, repeats: true) { [weak self] timer in
             guard let self else { return }

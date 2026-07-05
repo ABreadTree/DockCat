@@ -10,6 +10,14 @@ final class WalkBehaviorTests: XCTestCase {
         XCTAssertEqual(AnimationFrameSequence.pingPongIndices(frameCount: 0), [])
     }
 
+    func testPlaybackSequenceUsesDirectLoopForSmoothLongAnimations() {
+        XCTAssertEqual(AnimationFrameSequence.playbackIndices(frameCount: 24), Array(0..<24))
+    }
+
+    func testPlaybackSequenceKeepsPingPongForShortAnimations() {
+        XCTAssertEqual(AnimationFrameSequence.playbackIndices(frameCount: 4), [0, 1, 2, 3, 2, 1])
+    }
+
     func testWalkMotionTurnsWithShortPauseAtBoundary() {
         let model = WalkMotionModel(boundaryPause: 0.35)
         let state = WalkMotionState(x: 98, direction: 1, pauseRemaining: 0, phase: 0)

@@ -1,6 +1,13 @@
 import Foundation
 
 enum AnimationFrameSequence {
+    static func playbackIndices(frameCount: Int) -> [Int] {
+        guard frameCount < 12 else {
+            return Array(0..<frameCount)
+        }
+        return pingPongIndices(frameCount: frameCount)
+    }
+
     static func pingPongIndices(frameCount: Int) -> [Int] {
         guard frameCount > 1 else {
             return frameCount == 1 ? [0] : []

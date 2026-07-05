@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import math
 import shutil
 from statistics import median
 from pathlib import Path
@@ -16,12 +17,13 @@ APP_WALK_DIR = ROOT / "DockCatApp" / "DockCat" / "Resources" / "DefaultCat" / "a
 APP_XIAOHOU_WALK_DIR = ROOT / "DockCatApp" / "DockCat" / "Resources" / "DefaultCat" / "animations" / "walk-xiaohou"
 OUTPUT_DIR = ROOT / "xiaohou" / "generated_sources" / "greenscreen"
 KEY_COLOR = (0, 255, 0)
-
-
-def ping_pong(paths: list[Path]) -> list[Path]:
-    if len(paths) <= 2:
-        return paths
-    return paths + list(reversed(paths[1:-1]))
+GAIT_FRAME_COUNT = 24
+GAIT_FPS = 24
+GAIT_FRONT_AMPLITUDE = 21
+GAIT_REAR_AMPLITUDE = 30
+GAIT_FRONT_LIFT = 10
+GAIT_REAR_LIFT = 8
+STANDARD_WALK_FRAME_NAMES = [f"walk_{index:02d}.png" for index in range(1, GAIT_FRAME_COUNT + 1)]
 
 
 def source_walk_paths() -> list[Path]:
@@ -200,56 +202,88 @@ def clear_region(
     return output
 
 
-def row_warp_crop(
+def masked_limb_crop(
     image: Image.Image,
     box: tuple[int, int, int, int],
+    alpha_scale: float = 1.0,
+    darken: float = 1.0,
+    feather: int = 0,
+) -> Image.Image:
+    crop = image.crop(box).copy()
+    mask = rectangular_soft_mask(crop.size, (0, 0, crop.width, crop.height), feather=feather)
+    pixels = crop.load()
+    mask_pixels = mask.load()
+    for y in range(crop.height):
+        for x in range(crop.width):
+            r, g, b, a = pixels[x, y]
+            a = round(a * (mask_pixels[x, y] / 255.0) * alpha_scale)
+            pixels[x, y] = (round(r * darken), round(g * darken), round(b * darken), a)
+    return crop
+
+
+def row_warp_layer(
+    crop: Image.Image,
+    full_size: tuple[int, int],
+    origin: tuple[int, int],
     top_dx: int = 0,
     bottom_dx: int = 0,
-    dy: int = 0,
+    top_dy: int = 0,
+    bottom_dy: int = 0,
 ) -> Image.Image:
-    x0, y0, x1, y1 = box
-    crop = image.crop(box)
-    width, height = crop.size
-    output = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    origin_x, origin_y = origin
+    output = Image.new("RGBA", full_size, (0, 0, 0, 0))
     crop_pixels = crop.load()
-    for y in range(height):
-        t = y / (height - 1) if height > 1 else 0
+    for y in range(crop.height):
+        t = y / (crop.height - 1) if crop.height > 1 else 0
         smooth = t * t * (3 - 2 * t)
         dx = round(top_dx * (1 - smooth) + bottom_dx * smooth)
-        row = Image.new("RGBA", (width, 1), (0, 0, 0, 0))
+        dy = round(top_dy * (1 - smooth) + bottom_dy * smooth)
+        row = Image.new("RGBA", (crop.width, 1), (0, 0, 0, 0))
         row_pixels = row.load()
-        for x in range(width):
+        for x in range(crop.width):
             row_pixels[x, 0] = crop_pixels[x, y]
-        output.alpha_composite(row, (x0 + dx, y0 + y + dy))
+        output.alpha_composite(row, (origin_x + dx, origin_y + y + dy))
     return output
 
 
-def pronounced_gait_subjects(subjects: list[Image.Image]) -> list[Image.Image]:
+def smooth_gait_subjects(subjects: list[Image.Image], frame_count: int = GAIT_FRAME_COUNT) -> list[Image.Image]:
     base = subjects[0]
+    limb_specs = [
+        ("rear_far", (64, 310, 145, 425), 0.82, 0.88),
+        ("rear_near", (145, 302, 286, 425), 1.00, 1.00),
+        ("front_far", (286, 294, 386, 425), 0.82, 0.88),
+        ("front_near", (386, 285, 496, 430), 1.00, 1.00),
+    ]
+    limb_crops = [
+        (name, box, masked_limb_crop(base, box, alpha_scale=alpha, darken=darken), (box[0], box[1]))
+        for name, box, alpha, darken in limb_specs
+    ]
     output: list[Image.Image] = []
-    for index, subject in enumerate(subjects):
-        legs = subject.copy()
-        if index == 0:
-            legs = clear_region(legs, (72, 318, 230, 430), feather=5, top_ramp=10, strength=0.35)
-            legs.alpha_composite(row_warp_crop(subject, (70, 305, 235, 425), bottom_dx=-24))
-            legs.alpha_composite(row_warp_crop(subject, (335, 285, 512, 430), bottom_dx=8))
-        elif index == 1:
-            legs = clear_region(legs, (350, 296, 512, 430), feather=5, top_ramp=26)
-            legs = clear_region(legs, (392, 318, 512, 430), feather=3)
-            legs.alpha_composite(row_warp_crop(subject, (330, 285, 512, 430), top_dx=-3, bottom_dx=-86))
-            legs = clear_region(legs, (75, 318, 250, 430), feather=5, top_ramp=12, strength=0.40)
-            legs.alpha_composite(row_warp_crop(subject, (72, 305, 250, 425), top_dx=2, bottom_dx=30))
-        elif index == 2:
-            legs = clear_region(legs, (320, 302, 512, 430), feather=5, top_ramp=18, strength=0.35)
-            legs.alpha_composite(row_warp_crop(subject, (320, 285, 512, 430), top_dx=1, bottom_dx=18))
-            legs = clear_region(legs, (75, 318, 260, 430), feather=5, top_ramp=12, strength=0.42)
-            legs.alpha_composite(row_warp_crop(subject, (75, 305, 260, 425), bottom_dx=45))
-        else:
-            legs = clear_region(legs, (342, 296, 512, 430), feather=5, top_ramp=26)
-            legs = clear_region(legs, (392, 318, 512, 430), feather=3)
-            legs.alpha_composite(row_warp_crop(subject, (330, 285, 512, 430), top_dx=-5, bottom_dx=-74))
-            legs = clear_region(legs, (75, 318, 250, 430), feather=5, top_ramp=12, strength=0.36)
-            legs.alpha_composite(row_warp_crop(subject, (75, 305, 250, 425), bottom_dx=-32))
+    for index in range(frame_count):
+        phase = 2 * math.pi * index / frame_count
+        front_dx = round(GAIT_FRONT_AMPLITUDE * math.sin(phase))
+        rear_dx = round(-GAIT_REAR_AMPLITUDE * math.sin(phase))
+        front_lift = round(-GAIT_FRONT_LIFT * max(0.0, math.cos(phase)))
+        rear_lift = round(-GAIT_REAR_LIFT * max(0.0, -math.cos(phase)))
+
+        legs = clear_region(base, (48, 294, 512, 430), feather=6, top_ramp=28)
+        for name, _, crop, origin in limb_crops:
+            if name.startswith("front"):
+                dx = front_dx if name.endswith("near") else round(front_dx * 0.55)
+                lift = front_lift if name.endswith("near") else 0
+            else:
+                dx = rear_dx if name.endswith("near") else round(rear_dx * 0.55)
+                lift = rear_lift if name.endswith("near") else 0
+            legs.alpha_composite(
+                row_warp_layer(
+                    crop,
+                    base.size,
+                    origin,
+                    top_dx=round(dx * 0.08),
+                    bottom_dx=dx,
+                    bottom_dy=lift,
+                )
+            )
         output.append(combine_upper_body_with_moving_legs(base, legs))
     return output
 
@@ -269,7 +303,14 @@ def foot_center_x(image: Image.Image, x_range: range, y_range: range) -> float:
     return weighted_x / total
 
 
+def max_adjacent_delta(values: list[float]) -> float:
+    looped = values + [values[0]]
+    return max(abs(b - a) for a, b in zip(looped, looped[1:]))
+
+
 def validate_gait(subjects: list[Image.Image]) -> tuple[list[float], list[float]]:
+    if len(subjects) < GAIT_FRAME_COUNT:
+        raise SystemExit(f"Gait validation failed: expected {GAIT_FRAME_COUNT} frames, found {len(subjects)}")
     bboxes = [subject.getchannel("A").getbbox() for subject in subjects]
     if any(bbox is None for bbox in bboxes):
         raise SystemExit("Gait validation failed: one or more frames are fully transparent")
@@ -284,10 +325,17 @@ def validate_gait(subjects: list[Image.Image]) -> tuple[list[float], list[float]
     front_centers = [foot_center_x(subject, range(300, subjects[0].width), range(350, 430)) for subject in subjects]
     rear_stride = max(rear_centers) - min(rear_centers)
     front_stride = max(front_centers) - min(front_centers)
-    if rear_stride < 24 or front_stride < 34:
+    rear_step = max_adjacent_delta(rear_centers)
+    front_step = max_adjacent_delta(front_centers)
+    if rear_stride < 14 or front_stride < 18:
         raise SystemExit(
             "Gait validation failed: stride too small "
             f"rear={rear_stride:.1f} front={front_stride:.1f}"
+        )
+    if rear_step > 8 or front_step > 8:
+        raise SystemExit(
+            "Gait validation failed: adjacent foot step too jumpy "
+            f"rear={rear_step:.1f} front={front_step:.1f}"
         )
     return rear_centers, front_centers
 
@@ -298,19 +346,26 @@ def save_png(image: Image.Image, path: Path) -> None:
 
 
 def install_frames(extracted_dir: Path) -> None:
-    APP_XIAOHOU_WALK_DIR.mkdir(parents=True, exist_ok=True)
-    for index in range(1, 5):
-        name = f"walk_{index:02d}.png"
-        source = extracted_dir / name
-        shutil.copy2(source, PACK_WALK_DIR / name)
-        shutil.copy2(source, APP_WALK_DIR / name)
-        shutil.copy2(source, APP_XIAOHOU_WALK_DIR / name)
+    frame_paths = [extracted_dir / name for name in STANDARD_WALK_FRAME_NAMES]
+    missing = [path.name for path in frame_paths if not path.exists()]
+    if missing:
+        raise SystemExit(f"Cannot install walk frames, missing generated files: {missing}")
+    allowed_names = set(STANDARD_WALK_FRAME_NAMES)
+    for destination in [PACK_WALK_DIR, APP_WALK_DIR, APP_XIAOHOU_WALK_DIR]:
+        destination.mkdir(parents=True, exist_ok=True)
+        for old_frame in destination.glob("walk_*.png"):
+            old_frame.unlink()
+        for source in frame_paths:
+            shutil.copy2(source, destination / source.name)
+        for leftover in destination.glob("walk_*.png"):
+            if leftover.name not in allowed_names:
+                leftover.unlink()
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate Xiaohou green-screen motion preview and extracted walk sprites.")
     parser.add_argument("--canvas-size", type=int, default=512)
-    parser.add_argument("--fps", type=int, default=12)
+    parser.add_argument("--fps", type=int, default=GAIT_FPS)
     parser.add_argument("--install", action="store_true")
     args = parser.parse_args()
 
@@ -331,7 +386,7 @@ def main() -> None:
         normalize_subject_anchor(subject, target_bottom=target_bottom, target_center_x=target_center_x)
         for subject in extracted_subjects
     ]
-    gait_subjects = pronounced_gait_subjects(normalized_subjects)
+    gait_subjects = smooth_gait_subjects(normalized_subjects)
     rear_centers, front_centers = validate_gait(gait_subjects)
 
     green_frames_dir = OUTPUT_DIR / "green_frames"
@@ -341,7 +396,7 @@ def main() -> None:
         directory.mkdir(parents=True, exist_ok=True)
 
     green_sequence: list[Image.Image] = []
-    for sequence_index, subject in enumerate(ping_pong(gait_subjects), start=1):
+    for sequence_index, subject in enumerate(gait_subjects, start=1):
         green = green_frame(subject)
         green_sequence.append(green)
         green.save(green_frames_dir / f"frame_{sequence_index:03d}.png", optimize=True)

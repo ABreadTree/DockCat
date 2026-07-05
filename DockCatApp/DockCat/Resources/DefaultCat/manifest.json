@@ -16,12 +16,32 @@
   },
   "animations": {
     "walk": {
-      "fps": 6,
+      "fps": 24,
       "frames": [
         "animations/walk-xiaohou/walk_01.png",
         "animations/walk-xiaohou/walk_02.png",
         "animations/walk-xiaohou/walk_03.png",
-        "animations/walk-xiaohou/walk_04.png"
+        "animations/walk-xiaohou/walk_04.png",
+        "animations/walk-xiaohou/walk_05.png",
+        "animations/walk-xiaohou/walk_06.png",
+        "animations/walk-xiaohou/walk_07.png",
+        "animations/walk-xiaohou/walk_08.png",
+        "animations/walk-xiaohou/walk_09.png",
+        "animations/walk-xiaohou/walk_10.png",
+        "animations/walk-xiaohou/walk_11.png",
+        "animations/walk-xiaohou/walk_12.png",
+        "animations/walk-xiaohou/walk_13.png",
+        "animations/walk-xiaohou/walk_14.png",
+        "animations/walk-xiaohou/walk_15.png",
+        "animations/walk-xiaohou/walk_16.png",
+        "animations/walk-xiaohou/walk_17.png",
+        "animations/walk-xiaohou/walk_18.png",
+        "animations/walk-xiaohou/walk_19.png",
+        "animations/walk-xiaohou/walk_20.png",
+        "animations/walk-xiaohou/walk_21.png",
+        "animations/walk-xiaohou/walk_22.png",
+        "animations/walk-xiaohou/walk_23.png",
+        "animations/walk-xiaohou/walk_24.png"
       ]
     }
   },

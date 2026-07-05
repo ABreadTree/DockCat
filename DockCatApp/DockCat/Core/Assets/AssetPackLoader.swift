@@ -32,7 +32,7 @@ struct AssetPackValidationReport {
 final class AssetPackLoader {
     private static let defaultPackID = "default-xiaohou"
     private static let legacyDefaultPackID = "default-lizz"
-    private static let defaultXiaohouWalkFPS = 6.0
+    private static let defaultXiaohouWalkFPS = 24.0
 
     private let fileManager: FileManager
     private let bundle: Bundle
@@ -400,6 +400,9 @@ final class AssetPackLoader {
     }
 
     private func defaultXiaohouManifestData(withAppIcons: Bool) throws -> Data {
+        let frameLines = Self.defaultXiaohouWalkFramePaths()
+            .map { "                \"\($0)\"" }
+            .joined(separator: ",\n")
         let iconsBlock = withAppIcons ? """
           },
           "app_icons": {
@@ -426,12 +429,9 @@ final class AssetPackLoader {
           },
           "animations": {
             "walk": {
-              "fps": 6,
+              "fps": \(Int(Self.defaultXiaohouWalkFPS)),
               "frames": [
-                "animations/walk-xiaohou/walk_01.png",
-                "animations/walk-xiaohou/walk_02.png",
-                "animations/walk-xiaohou/walk_03.png",
-                "animations/walk-xiaohou/walk_04.png"
+\(frameLines)
               ]
             }
         \(iconsBlock)
@@ -446,12 +446,7 @@ final class AssetPackLoader {
     }
 
     private static func defaultXiaohouWalkFramePaths() -> [String] {
-        [
-            "animations/walk-xiaohou/walk_01.png",
-            "animations/walk-xiaohou/walk_02.png",
-            "animations/walk-xiaohou/walk_03.png",
-            "animations/walk-xiaohou/walk_04.png"
-        ]
+        (1 ... 24).map { String(format: "animations/walk-xiaohou/walk_%02d.png", $0) }
     }
 
     private func templateContainsNoLoadableImages(at root: URL) -> Bool {

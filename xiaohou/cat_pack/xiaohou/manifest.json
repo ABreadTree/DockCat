@@ -16,12 +16,32 @@
   },
   "animations": {
     "walk": {
-      "fps": 6,
+      "fps": 24,
       "frames": [
         "animations/walk/walk_01.png",
         "animations/walk/walk_02.png",
         "animations/walk/walk_03.png",
-        "animations/walk/walk_04.png"
+        "animations/walk/walk_04.png",
+        "animations/walk/walk_05.png",
+        "animations/walk/walk_06.png",
+        "animations/walk/walk_07.png",
+        "animations/walk/walk_08.png",
+        "animations/walk/walk_09.png",
+        "animations/walk/walk_10.png",
+        "animations/walk/walk_11.png",
+        "animations/walk/walk_12.png",
+        "animations/walk/walk_13.png",
+        "animations/walk/walk_14.png",
+        "animations/walk/walk_15.png",
+        "animations/walk/walk_16.png",
+        "animations/walk/walk_17.png",
+        "animations/walk/walk_18.png",
+        "animations/walk/walk_19.png",
+        "animations/walk/walk_20.png",
+        "animations/walk/walk_21.png",
+        "animations/walk/walk_22.png",
+        "animations/walk/walk_23.png",
+        "animations/walk/walk_24.png"
       ]
     }
   },
