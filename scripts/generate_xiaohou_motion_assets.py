@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import math
 import shutil
+from dataclasses import dataclass
 from statistics import median
 from pathlib import Path
 
@@ -24,6 +25,88 @@ GAIT_REAR_AMPLITUDE = 30
 GAIT_FRONT_LIFT = 10
 GAIT_REAR_LIFT = 8
 STANDARD_WALK_FRAME_NAMES = [f"walk_{index:02d}.png" for index in range(1, GAIT_FRAME_COUNT + 1)]
+LIMB_ORDER = ("left_front", "right_front", "left_rear", "right_rear")
+LIMB_RENDER_ORDER = ("right_rear", "right_front", "left_rear", "left_front")
+
+
+@dataclass(frozen=True)
+class LimbSpec:
+    name: str
+    crop_box: tuple[int, int, int, int]
+    alpha_scale: float
+    darken: float
+    stride: int
+    phase: float
+    lift: int
+    lift_phase: float
+
+
+@dataclass(frozen=True)
+class LimbPose:
+    name: str
+    dx: int
+    lift: int
+    alpha_scale: float
+    darken: float
+
+
+LIMB_SPECS = {
+    "left_front": LimbSpec(
+        name="left_front",
+        crop_box=(386, 285, 496, 430),
+        alpha_scale=1.00,
+        darken=1.00,
+        stride=GAIT_FRONT_AMPLITUDE,
+        phase=0.0,
+        lift=GAIT_FRONT_LIFT,
+        lift_phase=0.0,
+    ),
+    "right_front": LimbSpec(
+        name="right_front",
+        crop_box=(286, 294, 386, 425),
+        alpha_scale=0.78,
+        darken=0.88,
+        stride=round(GAIT_FRONT_AMPLITUDE * 0.62),
+        phase=-math.pi / 2,
+        lift=0,
+        lift_phase=math.pi / 2,
+    ),
+    "left_rear": LimbSpec(
+        name="left_rear",
+        crop_box=(145, 302, 286, 425),
+        alpha_scale=1.00,
+        darken=1.00,
+        stride=GAIT_REAR_AMPLITUDE,
+        phase=math.pi,
+        lift=GAIT_REAR_LIFT,
+        lift_phase=math.pi,
+    ),
+    "right_rear": LimbSpec(
+        name="right_rear",
+        crop_box=(64, 310, 145, 425),
+        alpha_scale=0.78,
+        darken=0.88,
+        stride=round(GAIT_REAR_AMPLITUDE * 0.62),
+        phase=math.pi / 2,
+        lift=0,
+        lift_phase=math.pi / 2,
+    ),
+}
+
+
+def limb_pose_for_frame(frame_index: int, limb_name: str) -> LimbPose:
+    spec = LIMB_SPECS[limb_name]
+    phase = 2 * math.pi * frame_index / GAIT_FRAME_COUNT
+    dx = round(spec.stride * math.cos(phase + spec.phase))
+    lift_angle = phase + spec.lift_phase
+    lift = round(-spec.lift * max(0.0, -math.sin(lift_angle)))
+    return LimbPose(
+        name=spec.name,
+        dx=dx,
+        lift=lift,
+        alpha_scale=spec.alpha_scale,
+        darken=spec.darken,
+    )
 
 
 def source_walk_paths() -> list[Path]:
@@ -248,40 +331,32 @@ def row_warp_layer(
 
 def smooth_gait_subjects(subjects: list[Image.Image], frame_count: int = GAIT_FRAME_COUNT) -> list[Image.Image]:
     base = subjects[0]
-    limb_specs = [
-        ("rear_far", (64, 310, 145, 425), 0.82, 0.88),
-        ("rear_near", (145, 302, 286, 425), 1.00, 1.00),
-        ("front_far", (286, 294, 386, 425), 0.82, 0.88),
-        ("front_near", (386, 285, 496, 430), 1.00, 1.00),
-    ]
-    limb_crops = [
-        (name, box, masked_limb_crop(base, box, alpha_scale=alpha, darken=darken), (box[0], box[1]))
-        for name, box, alpha, darken in limb_specs
-    ]
+    limb_crops = {
+        name: (
+            masked_limb_crop(
+                base,
+                spec.crop_box,
+                alpha_scale=spec.alpha_scale,
+                darken=spec.darken,
+            ),
+            (spec.crop_box[0], spec.crop_box[1]),
+        )
+        for name, spec in LIMB_SPECS.items()
+    }
     output: list[Image.Image] = []
     for index in range(frame_count):
-        phase = 2 * math.pi * index / frame_count
-        front_dx = round(GAIT_FRONT_AMPLITUDE * math.sin(phase))
-        rear_dx = round(-GAIT_REAR_AMPLITUDE * math.sin(phase))
-        front_lift = round(-GAIT_FRONT_LIFT * max(0.0, math.cos(phase)))
-        rear_lift = round(-GAIT_REAR_LIFT * max(0.0, -math.cos(phase)))
-
         legs = clear_region(base, (48, 294, 512, 430), feather=6, top_ramp=28)
-        for name, _, crop, origin in limb_crops:
-            if name.startswith("front"):
-                dx = front_dx if name.endswith("near") else round(front_dx * 0.55)
-                lift = front_lift if name.endswith("near") else 0
-            else:
-                dx = rear_dx if name.endswith("near") else round(rear_dx * 0.55)
-                lift = rear_lift if name.endswith("near") else 0
+        for name in LIMB_RENDER_ORDER:
+            pose = limb_pose_for_frame(index, name)
+            crop, origin = limb_crops[name]
             legs.alpha_composite(
                 row_warp_layer(
                     crop,
                     base.size,
                     origin,
-                    top_dx=round(dx * 0.08),
-                    bottom_dx=dx,
-                    bottom_dy=lift,
+                    top_dx=round(pose.dx * 0.10),
+                    bottom_dx=pose.dx,
+                    bottom_dy=pose.lift,
                 )
             )
         output.append(combine_upper_body_with_moving_legs(base, legs))

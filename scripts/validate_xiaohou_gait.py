@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PIL import Image
 
+from generate_xiaohou_motion_assets import GAIT_FRAME_COUNT, LIMB_ORDER, limb_pose_for_frame
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WALK_DIR = ROOT / "DockCatApp" / "DockCat" / "Resources" / "DefaultCat" / "animations" / "walk-xiaohou"
@@ -73,6 +75,29 @@ def foot_component_count(image: Image.Image) -> int:
     return count
 
 
+def validate_motion_plan() -> None:
+    expected_order = ["left_front", "right_front", "left_rear", "right_rear"]
+    if list(LIMB_ORDER) != expected_order:
+        raise SystemExit(f"Unexpected limb order: {LIMB_ORDER}")
+
+    frame_01 = {name: limb_pose_for_frame(0, name) for name in LIMB_ORDER}
+    if frame_01["left_front"].dx <= 0:
+        raise SystemExit("Frame 01 left_front should be forward")
+    if frame_01["left_rear"].dx >= 0:
+        raise SystemExit("Frame 01 left_rear should be back")
+    if frame_01["right_front"].alpha_scale >= frame_01["left_front"].alpha_scale:
+        raise SystemExit("Right/front far leg should render subtler than left/front near leg")
+
+    for frame_index in range(GAIT_FRAME_COUNT):
+        poses = [limb_pose_for_frame(frame_index, name) for name in LIMB_ORDER]
+        if len({pose.name for pose in poses}) != 4:
+            raise SystemExit(f"Frame {frame_index + 1:02d} does not have four named limbs")
+        if max(abs(pose.dx) for pose in poses) > 36:
+            raise SystemExit(f"Frame {frame_index + 1:02d} limb stride is too extreme: {poses}")
+        if min(pose.lift for pose in poses) < -12:
+            raise SystemExit(f"Frame {frame_index + 1:02d} limb lift is too extreme: {poses}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Validate Xiaohou walk frames for smooth visible gait.")
     parser.add_argument("--walk-dir", type=Path, default=DEFAULT_WALK_DIR)
@@ -82,6 +107,8 @@ def main() -> None:
     parser.add_argument("--min-front-stride", type=float, default=18)
     parser.add_argument("--min-rear-stride", type=float, default=14)
     args = parser.parse_args()
+
+    validate_motion_plan()
 
     expected_names = [f"walk_{index:02d}.png" for index in range(1, args.min_frames + 1)]
     expected_paths = [args.walk_dir / name for name in expected_names]
