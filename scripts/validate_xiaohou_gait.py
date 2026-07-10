@@ -3,14 +3,27 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from statistics import median
 
-from PIL import Image
+from PIL import Image, ImageChops
 
-from generate_xiaohou_motion_assets import GAIT_FRAME_COUNT, LIMB_ORDER, limb_pose_for_frame
+from generate_xiaohou_motion_assets import (
+    GAIT_FRAME_COUNT,
+    LIMB_ORDER,
+    extract_subject,
+    green_frame,
+    limb_pose_for_frame,
+    normalize_subject_anchor,
+    resized_frame,
+    source_walk_paths,
+    subject_center_x,
+    trim_green_fringe,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_WALK_DIR = ROOT / "DockCatApp" / "DockCat" / "Resources" / "DefaultCat" / "animations" / "walk-xiaohou"
+MAX_UPPER_ATTACHMENT_ALPHA_LOSS = 0.03
 
 
 def ping_pong_indices(count: int) -> list[int]:
@@ -27,11 +40,12 @@ def playback_indices(count: int) -> list[int]:
 
 def foot_center_x(image: Image.Image, x_range: range, y_range: range) -> float:
     alpha = image.getchannel("A")
+    pixels = alpha.load()
     weighted_x = 0
     total = 0
     for y in y_range:
         for x in x_range:
-            value = alpha.getpixel((x, y))
+            value = pixels[x, y]
             if value > 24:
                 weighted_x += x * value
                 total += value
@@ -48,12 +62,13 @@ def max_adjacent_delta(values: list[float], indices: list[int]) -> float:
 
 def foot_component_count(image: Image.Image) -> int:
     alpha = image.getchannel("A")
+    alpha_pixels = alpha.load()
     width, _ = image.size
     pixels = {
         (x, y)
         for y in range(372, 430)
         for x in range(width)
-        if alpha.getpixel((x, y)) > 32
+        if alpha_pixels[x, y] > 32
     }
     seen: set[tuple[int, int]] = set()
     count = 0
@@ -73,6 +88,38 @@ def foot_component_count(image: Image.Image) -> int:
         if size >= 30:
             count += 1
     return count
+
+
+def normalized_reference_subject(canvas_size: int) -> Image.Image:
+    subjects = [
+        trim_green_fringe(extract_subject(green_frame(resized_frame(path, canvas_size))))
+        for path in source_walk_paths()[:4]
+    ]
+    bboxes = [subject.getchannel("A").getbbox() for subject in subjects]
+    if any(bbox is None for bbox in bboxes):
+        raise SystemExit("Reference subject contains a fully transparent frame")
+    target_bottom = max(bbox[3] for bbox in bboxes if bbox is not None)
+    target_center_x = median(subject_center_x(subject) for subject in subjects)
+    return normalize_subject_anchor(subjects[0], target_bottom, target_center_x)
+
+
+def upper_attachment_alpha_loss(frame: Image.Image, reference: Image.Image) -> float:
+    frame_alpha = frame.getchannel("A")
+    reference_alpha = reference.getchannel("A")
+    frame_pixels = frame_alpha.load()
+    reference_pixels = reference_alpha.load()
+    retained_source_alpha = 0
+    lost_alpha = 0
+    for y in range(285, 315):
+        for x in range(40, min(510, frame.width)):
+            source_value = reference_pixels[x, y]
+            if source_value <= 64:
+                continue
+            retained_source_alpha += source_value
+            lost_alpha += max(0, source_value - frame_pixels[x, y])
+    if retained_source_alpha == 0:
+        raise SystemExit("Reference subject has no attachment pixels in the validation zone")
+    return lost_alpha / retained_source_alpha
 
 
 def validate_motion_plan() -> None:
@@ -96,6 +143,16 @@ def validate_motion_plan() -> None:
             raise SystemExit(f"Frame {frame_index + 1:02d} limb stride is too extreme: {poses}")
         if min(pose.lift for pose in poses) < -12:
             raise SystemExit(f"Frame {frame_index + 1:02d} limb lift is too extreme: {poses}")
+
+    for name in LIMB_ORDER:
+        poses = [limb_pose_for_frame(frame_index, name) for frame_index in range(GAIT_FRAME_COUNT)]
+        lifted_indices = [index for index, pose in enumerate(poses) if pose.lift < 0]
+        if not lifted_indices:
+            raise SystemExit(f"{name} never leaves the ground during the walk cycle")
+        for index in lifted_indices:
+            next_pose = poses[(index + 1) % GAIT_FRAME_COUNT]
+            if next_pose.dx < poses[index].dx - 1:
+                raise SystemExit(f"{name} moves backward while lifted at frame {index + 1:02d}")
 
 
 def main() -> None:
@@ -126,14 +183,29 @@ def main() -> None:
     paths = expected_paths
 
     frames = [Image.open(path).convert("RGBA") for path in paths]
+    reference = normalized_reference_subject(frames[0].width)
+    attachment_losses = [upper_attachment_alpha_loss(frame, reference) for frame in frames]
+    if max(attachment_losses) > MAX_UPPER_ATTACHMENT_ALPHA_LOSS:
+        raise SystemExit(
+            "Upper leg attachment loses too much torso alpha: "
+            f"losses={[round(value, 3) for value in attachment_losses]}"
+        )
     bboxes = [frame.getchannel("A").getbbox() for frame in frames]
     if any(bbox is None for bbox in bboxes):
         raise SystemExit("One or more walk frames are fully transparent")
 
     bottoms = [bbox[3] for bbox in bboxes if bbox is not None]
     right_edges = [bbox[2] for bbox in bboxes if bbox is not None]
-    if max(bottoms) - min(bottoms) > 2:
+    if max(bottoms) - min(bottoms) > 4:
         raise SystemExit(f"Foot baseline is unstable: bottoms={bottoms}")
+    upper_body = frames[0].crop((0, 0, frames[0].width, 285))
+    moving_upper_frames = [
+        index + 1
+        for index, frame in enumerate(frames)
+        if ImageChops.difference(upper_body, frame.crop((0, 0, frame.width, 285))).getbbox() is not None
+    ]
+    if moving_upper_frames:
+        raise SystemExit(f"Upper body anchor moves in frames: {moving_upper_frames}")
     if max(right_edges) >= frames[0].width:
         raise SystemExit(f"Frame is clipped at the right edge: right_edges={right_edges}")
 
@@ -151,6 +223,7 @@ def main() -> None:
     print(f"bottoms={bottoms} bottom_spread={max(bottoms) - min(bottoms)}")
     print(f"right_edges={right_edges} max_right={max(right_edges)}")
     print(f"foot_components={foot_counts} max_feet={max(foot_counts)}")
+    print(f"upper_attachment_alpha_loss={[round(value, 3) for value in attachment_losses]}")
     print(f"rear_foot_x={[round(value, 1) for value in rear_centers]} rear_stride={rear_stride:.1f} max_step={max_rear_step:.1f}")
     print(f"front_foot_x={[round(value, 1) for value in front_centers]} front_stride={front_stride:.1f} max_step={max_front_step:.1f}")
 

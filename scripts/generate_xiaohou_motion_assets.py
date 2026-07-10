@@ -68,8 +68,8 @@ LIMB_SPECS = {
         darken=0.88,
         stride=round(GAIT_FRONT_AMPLITUDE * 0.62),
         phase=-math.pi / 2,
-        lift=0,
-        lift_phase=math.pi / 2,
+        lift=round(GAIT_FRONT_LIFT * 0.60),
+        lift_phase=-math.pi / 2,
     ),
     "left_rear": LimbSpec(
         name="left_rear",
@@ -88,7 +88,7 @@ LIMB_SPECS = {
         darken=0.88,
         stride=round(GAIT_REAR_AMPLITUDE * 0.62),
         phase=math.pi / 2,
-        lift=0,
+        lift=round(GAIT_REAR_LIFT * 0.60),
         lift_phase=math.pi / 2,
     ),
 }
@@ -205,7 +205,7 @@ def normalize_subject_anchor(image: Image.Image, target_bottom: int, target_cent
     return translated(image, dx, dy)
 
 
-def lower_body_mask(size: tuple[int, int], y0: int = 292, y1: int = 338) -> Image.Image:
+def lower_body_mask(size: tuple[int, int], y0: int = 318, y1: int = 352) -> Image.Image:
     width, height = size
     mask = Image.new("L", size, 0)
     pixels = mask.load()
@@ -345,7 +345,7 @@ def smooth_gait_subjects(subjects: list[Image.Image], frame_count: int = GAIT_FR
     }
     output: list[Image.Image] = []
     for index in range(frame_count):
-        legs = clear_region(base, (48, 294, 512, 430), feather=6, top_ramp=28)
+        legs = clear_region(base, (48, 316, 512, 430), feather=5, top_ramp=18)
         for name in LIMB_RENDER_ORDER:
             pose = limb_pose_for_frame(index, name)
             crop, origin = limb_crops[name]
@@ -390,8 +390,16 @@ def validate_gait(subjects: list[Image.Image]) -> tuple[list[float], list[float]
     if any(bbox is None for bbox in bboxes):
         raise SystemExit("Gait validation failed: one or more frames are fully transparent")
     bottoms = [bbox[3] for bbox in bboxes if bbox is not None]
-    if max(bottoms) - min(bottoms) > 2:
+    if max(bottoms) - min(bottoms) > 4:
         raise SystemExit(f"Gait validation failed: unstable foot baseline bottoms={bottoms}")
+    upper_body = subjects[0].crop((0, 0, subjects[0].width, 285))
+    moving_upper_frames = [
+        index + 1
+        for index, subject in enumerate(subjects)
+        if ImageChops.difference(upper_body, subject.crop((0, 0, subject.width, 285))).getbbox() is not None
+    ]
+    if moving_upper_frames:
+        raise SystemExit(f"Gait validation failed: upper body anchor moves in frames={moving_upper_frames}")
     clipped_right = [index + 1 for index, bbox in enumerate(bboxes) if bbox is not None and bbox[2] >= subjects[index].width]
     if clipped_right:
         raise SystemExit(f"Gait validation failed: right edge clipped in frames={clipped_right}")
