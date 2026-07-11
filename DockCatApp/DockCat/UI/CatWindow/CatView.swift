@@ -1,12 +1,14 @@
 import AppKit
 
 final class CatView: NSView {
+    private let imageLayer = CALayer()
+
     var image: NSImage? {
-        didSet { needsDisplay = true }
+        didSet { updateImageContents() }
     }
 
     var isMirrored = false {
-        didSet { needsDisplay = true }
+        didSet { updateImageTransform() }
     }
 
     var onMouseDown: ((NSEvent) -> Void)?
@@ -16,23 +18,69 @@ final class CatView: NSView {
 
     override var isFlipped: Bool { true }
 
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.clear.setFill()
-        dirtyRect.fill()
-        guard let image else { return }
+    var hasImageLayerContents: Bool {
+        imageLayer.contents != nil
+    }
 
-        let target = bottomAlignedAspectFitRect(imageSize: image.size, in: bounds)
-        if isMirrored {
-            NSGraphicsContext.saveGraphicsState()
-            let transform = NSAffineTransform()
-            transform.translateX(by: bounds.maxX, yBy: 0)
-            transform.scaleX(by: -1, yBy: 1)
-            transform.concat()
-            image.draw(in: target)
-            NSGraphicsContext.restoreGraphicsState()
-        } else {
-            image.draw(in: target)
+    var imageLayerFrame: CGRect {
+        imageLayer.frame
+    }
+
+    var imageLayerTransform: CGAffineTransform {
+        imageLayer.affineTransform()
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureImageLayer()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configureImageLayer()
+    }
+
+    override func layout() {
+        super.layout()
+        updateImageLayerFrame()
+    }
+
+    private func configureImageLayer() {
+        wantsLayer = true
+        layerContentsRedrawPolicy = .never
+        imageLayer.contentsGravity = .resize
+        imageLayer.magnificationFilter = .linear
+        imageLayer.minificationFilter = .linear
+        imageLayer.actions = [
+            "contents": NSNull(),
+            "frame": NSNull(),
+            "transform": NSNull(),
+        ]
+        layer?.addSublayer(imageLayer)
+        updateImageTransform()
+    }
+
+    private func updateImageContents() {
+        guard let image else {
+            imageLayer.contents = nil
+            return
         }
+        var proposedRect = NSRect(origin: .zero, size: image.size)
+        imageLayer.contents = image.cgImage(forProposedRect: &proposedRect, context: nil, hints: nil)
+        updateImageLayerFrame()
+    }
+
+    private func updateImageLayerFrame() {
+        guard let image else {
+            imageLayer.frame = .zero
+            return
+        }
+        imageLayer.frame = bottomAlignedAspectFitRect(imageSize: image.size, in: bounds)
+        imageLayer.contentsScale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+    }
+
+    private func updateImageTransform() {
+        imageLayer.setAffineTransform(CGAffineTransform(scaleX: isMirrored ? -1 : 1, y: -1))
     }
 
     private func bottomAlignedAspectFitRect(imageSize: CGSize, in bounds: CGRect) -> CGRect {

@@ -5,6 +5,7 @@ DockCatApp/DerivedData*/
 DockCat 2.zip
 DockCat-Xiaohou-*.zip
 *.profraw
+__pycache__/
 xiaohou/Photo/
 xiaohou/generated_sources/
 xiaohou/qa/
