@@ -1,0 +1,17 @@
+{
+  "canvas": [512, 512],
+  "ground_y": 425,
+  "body": {"origin": [56, 128], "size": [404, 228]},
+  "tail": {"root": [88, 220], "length": 150},
+  "roots": {
+    "left_front": [365, 290],
+    "right_front": [344, 294],
+    "left_rear": [166, 291],
+    "right_rear": [146, 295]
+  },
+  "front_lengths": [56, 80],
+  "rear_lengths": [74, 82],
+  "paw_sizes": {"front": [38, 20], "rear": [42, 22]},
+  "far_scale": 0.94,
+  "far_brightness": 0.86
+}
