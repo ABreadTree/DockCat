@@ -17,6 +17,11 @@ COMPONENT_NAMES = (
     "rear_lower",
     "rear_paw",
 )
+LOWER_SEGMENT_KEEP_RATIOS = {
+    "front_lower": 0.70,
+    "rear_lower": 0.70,
+}
+LOWER_SEGMENT_TAPER_PIXELS = 10
 
 
 @dataclass(frozen=True)
@@ -108,15 +113,24 @@ def classify_components(components: list[Component]) -> dict[str, Component]:
     return dict(zip(COMPONENT_NAMES, [body, tail, *upper, *lower], strict=True))
 
 
-def extract_component(sheet: Image.Image, component: Component) -> Image.Image:
+def extract_component(sheet: Image.Image, component: Component, name: str) -> Image.Image:
     left, top, right, bottom = component.box
     padding = 8
-    output = Image.new("RGBA", (right - left + padding * 2, bottom - top + padding * 2))
+    component_width = right - left
+    keep_width = round(component_width * LOWER_SEGMENT_KEEP_RATIOS.get(name, 1.0))
+    output = Image.new("RGBA", (keep_width + padding * 2, bottom - top + padding * 2))
     source_pixels = sheet.load()
     output_pixels = output.load()
     for index in component.pixels:
         x, y = index % sheet.width, index // sheet.width
-        output_pixels[x - left + padding, y - top + padding] = source_pixels[x, y]
+        component_x = x - left
+        if component_x >= keep_width:
+            continue
+        red, green, blue, alpha = source_pixels[x, y]
+        if name in LOWER_SEGMENT_KEEP_RATIOS:
+            taper = min(1.0, (keep_width - component_x) / LOWER_SEGMENT_TAPER_PIXELS)
+            alpha = round(alpha * taper)
+        output_pixels[component_x + padding, y - top + padding] = (red, green, blue, alpha)
     return output
 
 
@@ -127,7 +141,7 @@ def prepare_rig(sheet_path: Path, output_dir: Path) -> dict[str, Path]:
     outputs = {}
     for name in COMPONENT_NAMES:
         output = output_dir / f"{name}.png"
-        extract_component(sheet, components[name]).save(output, optimize=True)
+        extract_component(sheet, components[name], name).save(output, optimize=True)
         outputs[name] = output
     return outputs
 
