@@ -8,16 +8,20 @@ from statistics import median
 from PIL import Image, ImageChops
 
 from generate_xiaohou_motion_assets import (
-    GAIT_FRAME_COUNT,
-    LIMB_ORDER,
     extract_subject,
     green_frame,
-    limb_pose_for_frame,
     normalize_subject_anchor,
     resized_frame,
     source_walk_paths,
     subject_center_x,
     trim_green_fringe,
+)
+from xiaohou_gait import (
+    FRAME_COUNT,
+    LIMB_ORDER,
+    TOUCHDOWN_FRAMES,
+    TOUCHDOWN_ORDER,
+    pose_for_frame,
 )
 
 
@@ -127,32 +131,31 @@ def validate_motion_plan() -> None:
     if list(LIMB_ORDER) != expected_order:
         raise SystemExit(f"Unexpected limb order: {LIMB_ORDER}")
 
-    frame_01 = {name: limb_pose_for_frame(0, name) for name in LIMB_ORDER}
-    if frame_01["left_front"].dx <= 0:
-        raise SystemExit("Frame 01 left_front should be forward")
-    if frame_01["left_rear"].dx >= 0:
-        raise SystemExit("Frame 01 left_rear should be back")
-    if frame_01["right_front"].alpha_scale >= frame_01["left_front"].alpha_scale:
-        raise SystemExit("Right/front far leg should render subtler than left/front near leg")
+    contacts = []
+    for frame_index in range(FRAME_COUNT):
+        poses = [pose_for_frame(frame_index, name) for name in LIMB_ORDER]
+        if sum(not pose.is_stance for pose in poses) != 1:
+            raise SystemExit(f"Frame {frame_index + 1:02d} does not have exactly one swing limb")
+        for pose in poses:
+            if pose.is_stance and pose.relative_y != 0:
+                raise SystemExit(f"{pose.name} leaves the ground during stance at frame {frame_index + 1:02d}")
+        contacts.extend(
+            (frame_index, pose.name)
+            for pose in poses
+            if pose.state == "contact"
+        )
 
-    for frame_index in range(GAIT_FRAME_COUNT):
-        poses = [limb_pose_for_frame(frame_index, name) for name in LIMB_ORDER]
-        if len({pose.name for pose in poses}) != 4:
-            raise SystemExit(f"Frame {frame_index + 1:02d} does not have four named limbs")
-        if max(abs(pose.dx) for pose in poses) > 36:
-            raise SystemExit(f"Frame {frame_index + 1:02d} limb stride is too extreme: {poses}")
-        if min(pose.lift for pose in poses) < -12:
-            raise SystemExit(f"Frame {frame_index + 1:02d} limb lift is too extreme: {poses}")
+    expected_contacts = [(TOUCHDOWN_FRAMES[name], name) for name in TOUCHDOWN_ORDER]
+    if contacts != expected_contacts:
+        raise SystemExit(f"Unexpected touchdown order: {contacts}")
 
     for name in LIMB_ORDER:
-        poses = [limb_pose_for_frame(frame_index, name) for frame_index in range(GAIT_FRAME_COUNT)]
-        lifted_indices = [index for index, pose in enumerate(poses) if pose.lift < 0]
-        if not lifted_indices:
+        poses = [pose_for_frame(frame_index, name) for frame_index in range(FRAME_COUNT)]
+        swing_x = [pose.relative_x for pose in poses if not pose.is_stance]
+        if not swing_x or swing_x != sorted(swing_x):
+            raise SystemExit(f"{name} does not move forward during swing: {swing_x}")
+        if not any(pose.relative_y < 0 for pose in poses if not pose.is_stance):
             raise SystemExit(f"{name} never leaves the ground during the walk cycle")
-        for index in lifted_indices:
-            next_pose = poses[(index + 1) % GAIT_FRAME_COUNT]
-            if next_pose.dx < poses[index].dx - 1:
-                raise SystemExit(f"{name} moves backward while lifted at frame {index + 1:02d}")
 
 
 def main() -> None:

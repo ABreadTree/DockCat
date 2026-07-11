@@ -2,13 +2,16 @@
 from __future__ import annotations
 
 import argparse
-import math
 import shutil
 from dataclasses import dataclass
 from statistics import median
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter
+
+from xiaohou_gait import FRAME_COUNT as GAIT_FRAME_COUNT
+from xiaohou_gait import FPS as GAIT_FPS
+from xiaohou_gait import pose_for_frame
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -18,95 +21,44 @@ APP_WALK_DIR = ROOT / "DockCatApp" / "DockCat" / "Resources" / "DefaultCat" / "a
 APP_XIAOHOU_WALK_DIR = ROOT / "DockCatApp" / "DockCat" / "Resources" / "DefaultCat" / "animations" / "walk-xiaohou"
 OUTPUT_DIR = ROOT / "xiaohou" / "generated_sources" / "greenscreen"
 KEY_COLOR = (0, 255, 0)
-GAIT_FRAME_COUNT = 24
-GAIT_FPS = 24
-GAIT_FRONT_AMPLITUDE = 21
-GAIT_REAR_AMPLITUDE = 30
-GAIT_FRONT_LIFT = 10
-GAIT_REAR_LIFT = 8
 STANDARD_WALK_FRAME_NAMES = [f"walk_{index:02d}.png" for index in range(1, GAIT_FRAME_COUNT + 1)]
-LIMB_ORDER = ("left_front", "right_front", "left_rear", "right_rear")
 LIMB_RENDER_ORDER = ("right_rear", "right_front", "left_rear", "left_front")
 
 
 @dataclass(frozen=True)
-class LimbSpec:
+class LimbRenderSpec:
     name: str
     crop_box: tuple[int, int, int, int]
     alpha_scale: float
     darken: float
-    stride: int
-    phase: float
-    lift: int
-    lift_phase: float
 
 
-@dataclass(frozen=True)
-class LimbPose:
-    name: str
-    dx: int
-    lift: int
-    alpha_scale: float
-    darken: float
-
-
-LIMB_SPECS = {
-    "left_front": LimbSpec(
+LIMB_RENDER_SPECS = {
+    "left_front": LimbRenderSpec(
         name="left_front",
         crop_box=(386, 285, 496, 430),
         alpha_scale=1.00,
         darken=1.00,
-        stride=GAIT_FRONT_AMPLITUDE,
-        phase=0.0,
-        lift=GAIT_FRONT_LIFT,
-        lift_phase=0.0,
     ),
-    "right_front": LimbSpec(
+    "right_front": LimbRenderSpec(
         name="right_front",
         crop_box=(286, 294, 386, 425),
         alpha_scale=0.78,
         darken=0.88,
-        stride=round(GAIT_FRONT_AMPLITUDE * 0.62),
-        phase=-math.pi / 2,
-        lift=round(GAIT_FRONT_LIFT * 0.60),
-        lift_phase=-math.pi / 2,
     ),
-    "left_rear": LimbSpec(
+    "left_rear": LimbRenderSpec(
         name="left_rear",
         crop_box=(145, 302, 286, 425),
         alpha_scale=1.00,
         darken=1.00,
-        stride=GAIT_REAR_AMPLITUDE,
-        phase=math.pi,
-        lift=GAIT_REAR_LIFT,
-        lift_phase=math.pi,
     ),
-    "right_rear": LimbSpec(
+    "right_rear": LimbRenderSpec(
         name="right_rear",
         crop_box=(64, 310, 145, 425),
         alpha_scale=0.78,
         darken=0.88,
-        stride=round(GAIT_REAR_AMPLITUDE * 0.62),
-        phase=math.pi / 2,
-        lift=round(GAIT_REAR_LIFT * 0.60),
-        lift_phase=math.pi / 2,
     ),
 }
-
-
-def limb_pose_for_frame(frame_index: int, limb_name: str) -> LimbPose:
-    spec = LIMB_SPECS[limb_name]
-    phase = 2 * math.pi * frame_index / GAIT_FRAME_COUNT
-    dx = round(spec.stride * math.cos(phase + spec.phase))
-    lift_angle = phase + spec.lift_phase
-    lift = round(-spec.lift * max(0.0, -math.sin(lift_angle)))
-    return LimbPose(
-        name=spec.name,
-        dx=dx,
-        lift=lift,
-        alpha_scale=spec.alpha_scale,
-        darken=spec.darken,
-    )
 
 
 def source_walk_paths() -> list[Path]:
@@ -341,22 +293,22 @@ def smooth_gait_subjects(subjects: list[Image.Image], frame_count: int = GAIT_FR
             ),
             (spec.crop_box[0], spec.crop_box[1]),
         )
-        for name, spec in LIMB_SPECS.items()
+        for name, spec in LIMB_RENDER_SPECS.items()
     }
     output: list[Image.Image] = []
     for index in range(frame_count):
         legs = clear_region(base, (48, 316, 512, 430), feather=5, top_ramp=18)
         for name in LIMB_RENDER_ORDER:
-            pose = limb_pose_for_frame(index, name)
+            pose = pose_for_frame(index, name)
             crop, origin = limb_crops[name]
             legs.alpha_composite(
                 row_warp_layer(
                     crop,
                     base.size,
                     origin,
-                    top_dx=round(pose.dx * 0.10),
-                    bottom_dx=pose.dx,
-                    bottom_dy=pose.lift,
+                    top_dx=round(pose.relative_x * 0.10),
+                    bottom_dx=pose.relative_x,
+                    bottom_dy=pose.relative_y,
                 )
             )
         output.append(combine_upper_body_with_moving_legs(base, legs))
