@@ -431,7 +431,7 @@ final class AssetPackLoader {
             "walk": {
               "fps": \(Int(Self.defaultXiaohouWalkFPS)),
               "frames": [
-\(frameLines)
+        \(frameLines)
               ]
             }
         \(iconsBlock)
